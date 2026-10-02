@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "id": "m1-sample-macro",
+  "name": "CLI Invoice Test",
+  "description": "Tests typing variables into form fields via CLI",
+  "settings": {
+    "default_wait_before": 0.05,
+    "image_confidence": 0.95,
+    "poll_interval": 0.1,
+    "type_mode": "paste"
+  },
+  "setup": [
+    {
+      "id": "s1",
+      "type": "wait",
+      "seconds": 0.1,
+      "note": "Initial delay"
+    }
+  ],
+  "per_row": [
+    {
+      "id": "r1",
+      "type": "type_text",
+      "text": "{Vendor}",
+      "mode": "paste",
+      "note": "Type Vendor"
+    },
+    {
+      "id": "r2",
+      "type": "key",
+      "keys": "tab",
+      "repeat": 1,
+      "note": "Next Field"
+    },
+    {
+      "id": "r3",
+      "type": "type_text",
+      "text": "{Amount}",
+      "mode": "paste",
+      "note": "Type Amount"
+    },
+    {
+      "id": "r4",
+      "type": "key",
+      "keys": "tab",
+      "repeat": 1,
+      "note": "Next Field"
+    },
+    {
+      "id": "r5",
+      "type": "type_text",
+      "text": "{Note}",
+      "mode": "paste",
+      "note": "Type Note"
+    }
+  ],
+  "cleanup": [
+    {
+      "id": "c1",
+      "type": "wait",
+      "seconds": 0.1,
+      "note": "Done cleanup"
+    }
+  ]
+}

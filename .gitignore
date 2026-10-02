@@ -1,0 +1,38 @@
+# Python virtual environments
+.venv/
+env/
+venv/
+ENV/
+
+# Python cache and bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+*.egg
+
+# Stepwise runtime & local data
+recovery/
+logs/
+results/
+*.swm.lock
+results.csv
+screenshots/
+
+# Build & packaging artifacts
+build/
+dist/
+release/build/
+release/dist/
+*.spec.bak
+
+# IDE & Editor files
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+Thumbs.db
+Desktop.ini

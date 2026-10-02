@@ -1,0 +1,7 @@
+# Stepwise Core Dependencies
+PySide6>=6.6.0
+mss>=9.0.1
+opencv-python-headless>=4.9.0
+numpy>=1.26.0
+openpyxl>=3.1.2
+charset-normalizer>=3.3.2

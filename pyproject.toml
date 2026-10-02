@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stepwise"
+version = "0.1.0"
+description = "Windows Data-Driven Macro Automation Tool"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "PySide6>=6.6.0",
+    "mss>=9.0.1",
+    "opencv-python-headless>=4.9.0",
+    "numpy>=1.26.0",
+    "openpyxl>=3.1.2",
+    "charset-normalizer>=3.3.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-qt>=4.4.0",
+    "ruff>=0.4.0",
+    "pyinstaller>=6.5.0",
+]
+
+[project.scripts]
+stepwise = "stepwise.app:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-ra -q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "A", "C4"]
+ignore = ["E501", "N802", "N801", "N818"]
