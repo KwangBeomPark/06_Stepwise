@@ -125,6 +125,13 @@ class MainWindow(QMainWindow):
 
         self.toolbar.addSeparator()
 
+        self.btn_save = QPushButton("💾 Save")
+        self.btn_save.setToolTip("Save macro (.swm) [Ctrl+S]")
+        self.btn_save.clicked.connect(self.save_current_macro)
+        self.toolbar.addWidget(self.btn_save)
+
+        self.toolbar.addSeparator()
+
         self.btn_settings = QPushButton(f"⚙ {Strings.SETTINGS}")
         self.btn_settings.clicked.connect(self._open_settings)
         self.toolbar.addWidget(self.btn_settings)
@@ -150,21 +157,37 @@ class MainWindow(QMainWindow):
         tree_layout.addWidget(self.action_tree)
 
         action_btn_layout = QHBoxLayout()
-        self.btn_add_click = QPushButton("+ Click")
+        action_btn_layout.setSpacing(8)
+
+        lbl_add = QLabel("Add Action:")
+        lbl_add.setStyleSheet("font-weight: bold; color: #475569;")
+        action_btn_layout.addWidget(lbl_add)
+
+        self.btn_add_click = QPushButton("👆 + Click")
+        self.btn_add_click.setToolTip("Add mouse click step (Pick coordinates on screen with F8)")
         self.btn_add_click.clicked.connect(lambda: self._add_quick_action("click"))
-        self.btn_add_type = QPushButton("+ Type")
+
+        self.btn_add_type = QPushButton("⌨ + Type")
+        self.btn_add_type.setToolTip("Add text input step (supports fixed text or {Column} variables)")
         self.btn_add_type.clicked.connect(lambda: self._add_quick_action("type_text"))
-        self.btn_add_key = QPushButton("+ Key")
+
+        self.btn_add_key = QPushButton("↵ + Key")
+        self.btn_add_key.setToolTip("Add keyboard key stroke (e.g. Enter, Tab, Esc)")
         self.btn_add_key.clicked.connect(lambda: self._add_quick_action("key"))
-        self.btn_add_wait = QPushButton("+ Wait")
+
+        self.btn_add_wait = QPushButton("⏱ + Wait")
+        self.btn_add_wait.setToolTip("Add fixed delay in seconds")
         self.btn_add_wait.clicked.connect(lambda: self._add_quick_action("wait"))
-        self.btn_delete = QPushButton(Strings.DELETE)
+
+        self.btn_delete = QPushButton(f"🗑 {Strings.DELETE}")
+        self.btn_delete.setToolTip("Delete selected action")
         self.btn_delete.clicked.connect(self._on_delete_action)
 
         action_btn_layout.addWidget(self.btn_add_click)
         action_btn_layout.addWidget(self.btn_add_type)
         action_btn_layout.addWidget(self.btn_add_key)
         action_btn_layout.addWidget(self.btn_add_wait)
+        action_btn_layout.addSpacing(12)
         action_btn_layout.addWidget(self.btn_delete)
         action_btn_layout.addStretch()
         tree_layout.addLayout(action_btn_layout)

@@ -12,6 +12,7 @@ class Strings:
     APP_SUBTITLE = "Data-Driven Macro Automation"
 
     # Toolbar
+    SAVE_MACRO = "Save"
     RUN = "Run"
     PAUSE = "Pause"
     RESUME = "Resume"
@@ -64,7 +65,14 @@ class Strings:
 
     # Properties Panel
     PROPERTIES_TITLE = "Properties"
-    NO_ACTION_SELECTED = "Select an action to view and edit its properties."
+    NO_ACTION_SELECTED = "Select an action in the tree to view and edit its properties."
+    PROPERTIES_GUIDE = (
+        "<b>💡 Quick Start Guide:</b><br><br>"
+        "1. Click <b>[+ Click]</b> or <b>[+ Type]</b> below the Action Tree.<br>"
+        "2. Select the added step in the tree to configure coordinates or text.<br>"
+        "3. Use <b>[Pick (F8)]</b> to capture screen coordinates directly by clicking.<br>"
+        "4. Switch to <b>Data Preview</b> tab to load an Excel/CSV file and use <code>{Variables}</code>."
+    )
     COORD_X = "X coordinate:"
     COORD_Y = "Y coordinate:"
     BUTTON = "Mouse button:"

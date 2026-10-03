@@ -66,10 +66,22 @@ class PropertiesPanel(QWidget):
 
     def _build_empty_state(self) -> None:
         self._clear_container()
-        lbl = QLabel(Strings.NO_ACTION_SELECTED)
-        lbl.setStyleSheet("color: #94a3b8; font-style: italic; padding: 20px;")
-        lbl.setAlignment(Qt.AlignCenter)
-        self.container_layout.addWidget(lbl)
+        guide_widget = QWidget()
+        guide_layout = QVBoxLayout(guide_widget)
+        guide_layout.setContentsMargins(16, 16, 16, 16)
+        guide_layout.setSpacing(10)
+
+        lbl = QLabel(Strings.PROPERTIES_GUIDE)
+        lbl.setStyleSheet(
+            "background-color: #f1f5f9; color: #334155; padding: 16px; "
+            "border: 1px dashed #cbd5e1; border-radius: 8px; line-height: 140%;"
+        )
+        lbl.setTextFormat(Qt.RichText)
+        lbl.setWordWrap(True)
+        guide_layout.addWidget(lbl)
+        guide_layout.addStretch()
+
+        self.container_layout.addWidget(guide_widget)
         self.container_layout.addStretch()
 
     def _clear_container(self) -> None:
