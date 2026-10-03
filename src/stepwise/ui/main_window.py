@@ -49,6 +49,7 @@ from stepwise.ui.preflight_dialog import PreflightDialog
 from stepwise.ui.properties_panel import PropertiesPanel
 from stepwise.ui.run_panel import FloatingRunPanel
 from stepwise.ui.run_summary import RunSummaryDialog
+from stepwise.ui.screen_crosshair import ScreenCrosshairOverlay
 from stepwise.ui.settings_dialog import SettingsDialog
 from stepwise.ui.strings import Strings
 
@@ -154,6 +155,12 @@ class MainWindow(QMainWindow):
 
         self.action_tree = ActionTreeWidget()
         self.action_tree.action_selected.connect(self._on_action_selected)
+        self.action_tree.request_add_action.connect(self._on_request_add_action)
+        self.action_tree.request_move_section.connect(self._on_request_move_section)
+        self.action_tree.request_delete_action.connect(self._on_request_delete_action)
+        self.action_tree.request_duplicate_action.connect(self._on_request_duplicate_action)
+        self.action_tree.request_move_up.connect(self._on_request_move_up)
+        self.action_tree.request_move_down.connect(self._on_request_move_down)
         tree_layout.addWidget(self.action_tree)
 
         action_btn_layout = QHBoxLayout()
@@ -199,6 +206,8 @@ class MainWindow(QMainWindow):
         self.prop_panel.property_changed.connect(self._on_property_changed)
         self.prop_panel.request_pick.connect(self._trigger_pick_overlay)
         self.prop_panel.request_capture.connect(self._trigger_capture_overlay)
+        self.prop_panel.request_show_crosshair.connect(self._show_screen_crosshair)
+        self.prop_panel.request_test_step.connect(self._test_single_action)
         self.bottom_tabs.addTab(self.prop_panel, Strings.PROPERTIES_TITLE)
 
         self.data_panel = DataPanel()
@@ -276,29 +285,99 @@ class MainWindow(QMainWindow):
         self.action_tree.rebuild_tree()
 
     def _add_quick_action(self, act_type: str) -> None:
+        sec_name, idx = self.action_tree.get_current_target_section()
+        self._on_request_add_action(act_type, sec_name, idx)
+
+    def _on_request_add_action(self, act_type: str, section: str, index: int) -> None:
         new_act = ActionItem(type=act_type, enabled=True)
-        self._current_macro.per_row.append(new_act)
+        target_list = getattr(self._current_macro, section, self._current_macro.per_row)
+        idx = min(max(0, index), len(target_list))
+        target_list.insert(idx, new_act)
         self.action_tree.rebuild_tree()
+        self.prop_panel.set_action(new_act)
+        self.status_bar.showMessage(f"Added {act_type} to {section.upper()} (Step #{idx + 1})")
+
+    def _on_request_move_section(self, action: ActionItem, target_section: str) -> None:
+        for sec in (self._current_macro.setup, self._current_macro.per_row, self._current_macro.cleanup):
+            if action in sec:
+                sec.remove(action)
+                break
+        target_list = getattr(self._current_macro, target_section, self._current_macro.per_row)
+        target_list.append(action)
+        self.action_tree.rebuild_tree()
+        self.prop_panel.set_action(action)
+        self.status_bar.showMessage(f"Moved step to {target_section.upper()}")
+
+    def _on_request_delete_action(self, action: ActionItem) -> None:
+        for sec in (self._current_macro.setup, self._current_macro.per_row, self._current_macro.cleanup):
+            if action in sec:
+                sec.remove(action)
+                break
+        self.action_tree.rebuild_tree()
+        self.prop_panel.set_action(None)
+        self.status_bar.showMessage("Deleted step")
+
+    def _on_request_duplicate_action(self, action: ActionItem) -> None:
+        import copy
+        new_act = copy.deepcopy(action)
+        for sec in (self._current_macro.setup, self._current_macro.per_row, self._current_macro.cleanup):
+            if action in sec:
+                idx = sec.index(action)
+                sec.insert(idx + 1, new_act)
+                break
+        self.action_tree.rebuild_tree()
+        self.prop_panel.set_action(new_act)
+        self.status_bar.showMessage(f"Duplicated {action.type} step")
+
+    def _on_request_move_up(self, action: ActionItem) -> None:
+        for sec in (self._current_macro.setup, self._current_macro.per_row, self._current_macro.cleanup):
+            if action in sec:
+                idx = sec.index(action)
+                if idx > 0:
+                    sec[idx], sec[idx - 1] = sec[idx - 1], sec[idx]
+                    self.action_tree.rebuild_tree()
+                    self.prop_panel.set_action(action)
+                break
+
+    def _on_request_move_down(self, action: ActionItem) -> None:
+        for sec in (self._current_macro.setup, self._current_macro.per_row, self._current_macro.cleanup):
+            if action in sec:
+                idx = sec.index(action)
+                if idx < len(sec) - 1:
+                    sec[idx], sec[idx + 1] = sec[idx + 1], sec[idx]
+                    self.action_tree.rebuild_tree()
+                    self.prop_panel.set_action(action)
+                break
+
+    def _show_screen_crosshair(self, x: int, y: int) -> None:
+        self._crosshair_overlay = ScreenCrosshairOverlay(x, y)
+        self.status_bar.showMessage(f"Displaying target coordinate ({x}, {y}) on screen (1.5s)...")
+
+    def _test_single_action(self, action: ActionItem) -> None:
+        try:
+            from stepwise.engine.actions import execute_action
+            sample_row = self._data_rows[0] if self._data_rows else {}
+            self.status_bar.showMessage(f"Executing step '{action.type}' immediately...")
+            execute_action(action, sample_row)
+            self.status_bar.showMessage(f"Step '{action.type}' executed successfully! ✅")
+        except Exception as e:
+            QMessageBox.warning(self, "Step Test Failed", f"Execution error:\n{e}")
 
     def _on_delete_action(self) -> None:
         selected = self.action_tree.tree.selectedItems()
         if not selected:
             return
-        data = selected[0].data(0, Qt.UserRole)
+        data = selected[0].data(0, Qt.ItemDataRole.UserRole)
         if isinstance(data, ActionItem):
-            for sec in (self._current_macro.setup, self._current_macro.per_row, self._current_macro.cleanup):
-                if data in sec:
-                    sec.remove(data)
-                    break
-            self.action_tree.rebuild_tree()
-            self.prop_panel.set_action(None)
+            self._on_request_delete_action(data)
 
     def _on_data_loaded(self, filepath: str, headers: list[str], rows: list[dict[str, str]]) -> None:
         self._data_filepath = filepath
         self._data_headers = headers
         self._data_rows = rows
         self._data_row_nums = list(range(1, len(rows) + 1))
-        self.status_bar.showMessage(f"Connected data: {os.path.basename(filepath)}")
+        self.prop_panel.update_variable_completions(headers)
+        self.status_bar.showMessage(f"Connected data: {os.path.basename(filepath)} ({len(rows)} rows)")
 
     def _insert_variable_into_current_action(self, var_text: str) -> None:
         act = self.prop_panel._current_action

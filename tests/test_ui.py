@@ -71,3 +71,36 @@ def test_data_panel_status_update(qapp: QApplication) -> None:
     # Update status
     panel.update_row_status(1, "Done")
     assert panel.table.item(0, 1).text() == "Done"
+
+
+def test_action_tree_target_section(qapp: QApplication) -> None:
+    tree_widget = ActionTreeWidget()
+    macro = Macro(
+        setup=[ActionItem(type="wait", seconds=1.0)],
+        per_row=[ActionItem(type="click", x=50, y=50)],
+        cleanup=[],
+    )
+    tree_widget.load_macro(macro)
+
+    # When nothing selected, defaults to per_row at end
+    sec, idx = tree_widget.get_current_target_section()
+    assert sec == "per_row"
+    assert idx == 1
+
+
+def test_properties_panel_variable_completions(qapp: QApplication) -> None:
+    prop_panel = PropertiesPanel()
+    act = ActionItem(type="type_text", text="Initial")
+    prop_panel.set_action(act)
+
+    prop_panel.update_variable_completions(["VendorCode", "InvoiceAmount"])
+    assert prop_panel._available_headers == ["VendorCode", "InvoiceAmount"]
+    assert prop_panel.txt_text is not None
+
+
+def test_screen_crosshair_overlay(qapp: QApplication) -> None:
+    from stepwise.ui.screen_crosshair import ScreenCrosshairOverlay
+    overlay = ScreenCrosshairOverlay(x=200, y=300, duration_ms=100)
+    assert overlay.x() == 150
+    assert overlay.y() == 250
+    overlay.close()

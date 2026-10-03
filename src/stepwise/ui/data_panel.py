@@ -60,6 +60,17 @@ class DataPanel(QWidget):
         top_layout.addStretch()
         layout.addLayout(top_layout)
 
+        # Chips container for quick column variable insertion
+        self.chips_widget = QWidget()
+        self.chips_layout = QHBoxLayout(self.chips_widget)
+        self.chips_layout.setContentsMargins(0, 2, 0, 2)
+        self.chips_layout.setSpacing(6)
+        self.lbl_chips_title = QLabel("Insert Column Variable:")
+        self.lbl_chips_title.setStyleSheet("font-weight: bold; color: #475569;")
+        self.chips_layout.addWidget(self.lbl_chips_title)
+        self.chips_widget.hide()
+        layout.addWidget(self.chips_widget)
+
         # Table
         self.table = QTableWidget()
         self.table.setAlternatingRowColors(True)
@@ -86,10 +97,32 @@ class DataPanel(QWidget):
             self._row_statuses.clear()
 
             self._rebuild_table()
+            self._rebuild_chips()
             self.lbl_info.setText(f"{os.path.basename(filepath)} ({len(rows)} rows)")
             self.data_loaded.emit(filepath, headers, rows)
         except Exception as e:
             self.lbl_info.setText(f"Error loading file: {e}")
+
+    def _rebuild_chips(self) -> None:
+        """Create clickable chip buttons for each column header."""
+        # Clear existing chips except the title label
+        while self.chips_layout.count() > 1:
+            item = self.chips_layout.takeAt(1)
+            if item.widget():
+                item.widget().deleteLater()
+
+        for header in self._headers:
+            btn = QPushButton(f"+ {{{header}}}")
+            btn.setStyleSheet(
+                "background-color: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; "
+                "border-radius: 4px; padding: 2px 8px; font-weight: 500;"
+            )
+            btn.setToolTip(f"Click to insert {{{header}}} into the current text field")
+            btn.clicked.connect(lambda _, h=header: self.insert_variable_requested.emit(f"{{{h}}}"))
+            self.chips_layout.addWidget(btn)
+
+        self.chips_layout.addStretch()
+        self.chips_widget.show()
 
     def _rebuild_table(self) -> None:
         self.table.clear()

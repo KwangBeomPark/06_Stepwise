@@ -10,13 +10,14 @@ Displays 3 sections (Setup / Per Row / Cleanup) in a unified tree view with:
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QPoint, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QFont
 from PySide6.QtWidgets import (
     QCheckBox,
     QHBoxLayout,
     QHeaderView,
     QLineEdit,
+    QMenu,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -56,6 +57,12 @@ def format_action_target(action: ActionItem) -> str:
 class ActionTreeWidget(QWidget):
     action_selected = Signal(object)  # ActionItem | None
     macro_modified = Signal()
+    request_add_action = Signal(str, str, int)  # (action_type, section_name, insert_index)
+    request_move_section = Signal(object, str)   # (action_item, target_section_name)
+    request_delete_action = Signal(object)       # (action_item)
+    request_duplicate_action = Signal(object)    # (action_item)
+    request_move_up = Signal(object)             # (action_item)
+    request_move_down = Signal(object)           # (action_item)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -108,7 +115,93 @@ class ActionTreeWidget(QWidget):
 
         self.tree.itemSelectionChanged.connect(self._on_selection_changed)
         self.tree.itemChanged.connect(self._on_item_changed)
+        self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.tree.customContextMenuRequested.connect(self._show_context_menu)
         layout.addWidget(self.tree)
+
+    def get_current_target_section(self) -> tuple[str, int]:
+        """Find currently selected section name and insertion index."""
+        if not self._macro:
+            return ("per_row", 0)
+
+        selected = self.tree.selectedItems()
+        if not selected:
+            return ("per_row", len(self._macro.per_row))
+
+        item = selected[0]
+        data = item.data(0, Qt.ItemDataRole.UserRole)
+
+        if data == "header_setup":
+            return ("setup", len(self._macro.setup))
+        if data == "header_per_row":
+            return ("per_row", len(self._macro.per_row))
+        if data == "header_cleanup":
+            return ("cleanup", len(self._macro.cleanup))
+
+        if isinstance(data, ActionItem):
+            if data in self._macro.setup:
+                return ("setup", self._macro.setup.index(data) + 1)
+            if data in self._macro.per_row:
+                return ("per_row", self._macro.per_row.index(data) + 1)
+            if data in self._macro.cleanup:
+                return ("cleanup", self._macro.cleanup.index(data) + 1)
+
+        return ("per_row", len(self._macro.per_row))
+
+    def _show_context_menu(self, pos: QPoint) -> None:
+        item = self.tree.itemAt(pos)
+        menu = QMenu(self)
+
+        sec_name, ins_idx = self.get_current_target_section()
+
+        # 1. Quick Add Actions
+        menu_add = menu.addMenu(f"+ Add Action to {sec_name.upper()}")
+        act_add_click = menu_add.addAction("👆 Add Click")
+        act_add_click.triggered.connect(lambda: self.request_add_action.emit("click", sec_name, ins_idx))
+
+        act_add_type = menu_add.addAction("⌨ Add Type text")
+        act_add_type.triggered.connect(lambda: self.request_add_action.emit("type_text", sec_name, ins_idx))
+
+        act_add_key = menu_add.addAction("↵ Add Key press")
+        act_add_key.triggered.connect(lambda: self.request_add_action.emit("key", sec_name, ins_idx))
+
+        act_add_wait = menu_add.addAction("⏱ Add Wait")
+        act_add_wait.triggered.connect(lambda: self.request_add_action.emit("wait", sec_name, ins_idx))
+
+        menu_add.addSeparator()
+        act_add_img = menu_add.addAction("🖼 Add Click image")
+        act_add_img.triggered.connect(lambda: self.request_add_action.emit("click_image", sec_name, ins_idx))
+
+        if item:
+            data = item.data(0, Qt.ItemDataRole.UserRole)
+            if isinstance(data, ActionItem):
+                menu.addSeparator()
+
+                act_up = menu.addAction("↑ Move Up")
+                act_up.triggered.connect(lambda: self.request_move_up.emit(data))
+
+                act_down = menu.addAction("↓ Move Down")
+                act_down.triggered.connect(lambda: self.request_move_down.emit(data))
+
+                menu.addSeparator()
+                menu_move_sec = menu.addMenu("Move to Section")
+                act_m_setup = menu_move_sec.addAction("Move to SETUP")
+                act_m_setup.triggered.connect(lambda: self.request_move_section.emit(data, "setup"))
+
+                act_m_per = menu_move_sec.addAction("Move to PER ROW")
+                act_m_per.triggered.connect(lambda: self.request_move_section.emit(data, "per_row"))
+
+                act_m_clean = menu_move_sec.addAction("Move to CLEANUP")
+                act_m_clean.triggered.connect(lambda: self.request_move_section.emit(data, "cleanup"))
+
+                menu.addSeparator()
+                act_dup = menu.addAction("📋 Duplicate")
+                act_dup.triggered.connect(lambda: self.request_duplicate_action.emit(data))
+
+                act_del = menu.addAction("🗑 Delete")
+                act_del.triggered.connect(lambda: self.request_delete_action.emit(data))
+
+        menu.exec(self.tree.viewport().mapToGlobal(pos))
 
     def load_macro(self, macro: Macro) -> None:
         """Load and display a macro in the tree."""

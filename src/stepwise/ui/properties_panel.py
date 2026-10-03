@@ -13,6 +13,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QCompleter,
     QDoubleSpinBox,
     QFormLayout,
     QGroupBox,
@@ -36,10 +37,13 @@ class PropertiesPanel(QWidget):
     request_capture = Signal()
     request_test_step = Signal(object)
     request_test_match = Signal(object)
+    request_show_crosshair = Signal(int, int)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._current_action: ActionItem | None = None
+        self._available_headers: list[str] = []
+        self.txt_text: QLineEdit | None = None
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(8, 8, 8, 8)
@@ -147,6 +151,19 @@ class PropertiesPanel(QWidget):
             h_coords.addWidget(btn_pick)
             act_layout.addRow("Coordinates:", h_coords)
 
+            h_helpers = QHBoxLayout()
+            btn_show = QPushButton("📍 " + Strings.SHOW_ON_SCREEN)
+            btn_show.setToolTip("Temporarily display target position on screen with a red crosshair")
+            btn_show.clicked.connect(lambda: self.request_show_crosshair.emit(action.x, action.y))
+
+            btn_test_click = QPushButton("⚡ " + Strings.TEST_THIS_STEP)
+            btn_test_click.setToolTip("Test this click action immediately on screen")
+            btn_test_click.clicked.connect(lambda: self.request_test_step.emit(action))
+
+            h_helpers.addWidget(btn_show)
+            h_helpers.addWidget(btn_test_click)
+            act_layout.addRow("Action Tools:", h_helpers)
+
             self.cmb_button = QComboBox()
             self.cmb_button.addItems(["left", "right", "middle"])
             self.cmb_button.setCurrentText(action.button)
@@ -163,7 +180,20 @@ class PropertiesPanel(QWidget):
             self.txt_text = QLineEdit(action.text)
             self.txt_text.setPlaceholderText("Enter text or {ColumnName}")
             self.txt_text.textChanged.connect(lambda v: setattr(action, "text", v) or self.property_changed.emit())
+
+            if self._available_headers:
+                variables = [f"{{{h}}}" for h in self._available_headers]
+                completer = QCompleter(variables, self.txt_text)
+                completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+                completer.setFilterMode(Qt.MatchFlag.MatchContains)
+                self.txt_text.setCompleter(completer)
+
             act_layout.addRow(Strings.TEXT_TO_TYPE, self.txt_text)
+
+            btn_test_type = QPushButton("⚡ " + Strings.TEST_THIS_STEP)
+            btn_test_type.setToolTip("Test typing this text immediately into the active field")
+            btn_test_type.clicked.connect(lambda: self.request_test_step.emit(action))
+            act_layout.addRow("Action Tools:", btn_test_type)
 
             self.cmb_mode = QComboBox()
             self.cmb_mode.addItems(["paste", "keystrokes"])
@@ -181,6 +211,11 @@ class PropertiesPanel(QWidget):
             self.txt_keys.setPlaceholderText("e.g. enter, tab, ctrl+s, esc")
             self.txt_keys.textChanged.connect(lambda v: setattr(action, "keys", v) or self.property_changed.emit())
             act_layout.addRow(Strings.KEYS_TO_PRESS, self.txt_keys)
+
+            btn_test_key = QPushButton("⚡ " + Strings.TEST_THIS_STEP)
+            btn_test_key.setToolTip("Test pressing this key immediately")
+            btn_test_key.clicked.connect(lambda: self.request_test_step.emit(action))
+            act_layout.addRow("Action Tools:", btn_test_key)
 
             self.spin_repeat = QSpinBox()
             self.spin_repeat.setRange(1, 100)
@@ -245,3 +280,13 @@ class PropertiesPanel(QWidget):
         if self._current_action:
             self._current_action.wait_before = val
             self.property_changed.emit()
+
+    def update_variable_completions(self, headers: list[str]) -> None:
+        """Update available variable completions from loaded data columns."""
+        self._available_headers = headers
+        if hasattr(self, "txt_text") and self.txt_text is not None:
+            variables = [f"{{{h}}}" for h in headers]
+            completer = QCompleter(variables, self.txt_text)
+            completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+            completer.setFilterMode(Qt.MatchFlag.MatchContains)
+            self.txt_text.setCompleter(completer)
