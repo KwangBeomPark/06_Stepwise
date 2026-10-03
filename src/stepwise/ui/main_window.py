@@ -38,7 +38,8 @@ from stepwise.core.package import load_package, save_package
 from stepwise.engine.errors import StepFailure
 from stepwise.engine.runner import ExecutionCallbacks, RunSummary, run_macro
 from stepwise.engine.timing import ExecutionController, SpeedMode
-from stepwise.services.hotkeys import VK_MAP, GlobalHotkeyManager
+from stepwise.services.hotkeys import GlobalHotkeyManager
+from stepwise.services.input_win import VK_MAP
 from stepwise.services.screen import get_screen_info
 from stepwise.ui.action_tree import ActionTreeWidget
 from stepwise.ui.capture_overlay import CaptureOverlay
