@@ -77,8 +77,8 @@ class PropertiesPanel(QWidget):
 
         lbl = QLabel(Strings.PROPERTIES_GUIDE)
         lbl.setStyleSheet(
-            "background-color: #f1f5f9; color: #334155; padding: 16px; "
-            "border: 1px dashed #cbd5e1; border-radius: 8px; line-height: 140%;"
+            "background-color: #f8fafc; color: #1e293b; padding: 18px; "
+            "border: 1px solid #cbd5e1; border-radius: 8px; line-height: 150%; font-size: 13px;"
         )
         lbl.setTextFormat(Qt.RichText)
         lbl.setWordWrap(True)

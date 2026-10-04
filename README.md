@@ -60,6 +60,14 @@ Workflows are structured into an intuitive, sequential 3-part hierarchy:
 
 ---
 
+## 🖥️ Application UI Preview
+
+<p align="center">
+  <img src="assets/images/stepwise-app-ui.png" width="950" alt="Stepwise Application UI - High-Contrast Enterprise Light Theme with 3-Section Action Pipeline">
+</p>
+
+---
+
 ## 🚀 Quick Start
 
 ### 1. Install via User Installer (For General Users)
@@ -91,7 +99,7 @@ Stepwise is engineered to rigorous quality and reliability standards:
 
 | Inspection Area | Tooling | Result | Details |
 | :--- | :--- | :---: | :--- |
-| **Unit & Integration Tests** | `pytest` | **39 / 39 PASSED** | Models, variable substitution, Win32 SendInput, template matcher, and runner |
+| **Unit & Integration Tests** | `pytest` | **42 / 42 PASSED** | Models, variable substitution, Win32 SendInput, template matcher, and runner |
 | **Code Style & Linting** | `ruff` | **0 Warnings, 0 Errors** | Strict PEP 8 & modern Python clean code conventions |
 | **Windows OS Spikes** | Win32 API | **9 / 9 PASSED** | DPI scaling, virtual screen capture, session lock events, F12 global hotkey |
 | **Packaging & Installer** | PyInstaller + Inno Setup | **SUCCESS** | Standalone installer (`Stepwise-Setup-0.1.0.exe`, 71.5 MB) generated |

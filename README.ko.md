@@ -60,6 +60,14 @@
 
 ---
 
+## 🖥️ 사용자 인터페이스 (Application UI)
+
+<p align="center">
+  <img src="assets/images/stepwise-app-ui.png" width="950" alt="Stepwise 사용자 인터페이스 - 직관적인 3구역 트리 및 고대비 엔터프라이즈 라이트 테마">
+</p>
+
+---
+
 ## 🚀 빠른 시작 (Quick Start)
 
 ### 1. 인스톨러로 간편 설치 (일반 사용자용)
@@ -91,7 +99,7 @@ Stepwise는 엔터프라이즈 환경에서의 무결성과 안정성을 보장�
 
 | 검증 분야 | 검증 도구 | 검증 결과 | 상세 내용 |
 | :--- | :--- | :---: | :--- |
-| **단위/통합 테스트** | `pytest` | **39 / 39 통과** | 모델, 변수 보간, Win32 입력, 템플릿 매칭, 러너 전원 통과 |
+| **단위/통합 테스트** | `pytest` | **42 / 42 통과** | 모델, 변수 보간, Win32 입력, 템플릿 매칭, 러너 전원 통과 |
 | **코드 스타일 & 린트** | `ruff` | **0 Warnings, 0 Errors** | PEP 8 및 최신 Python 클린 코드 컨벤션 준수 |
 | **Windows 스파이크** | Win32 API | **9대 항목 통과** | DPI 배율, SendInput, 가상화면 캡처, F12 핫키 검증 완료 |
 | **패키징 검증** | PyInstaller + Inno Setup | **빌드 성공** | 독립 설치 프로그램(`Stepwise-Setup-0.1.0.exe`, 71.5 MB) 생성 |

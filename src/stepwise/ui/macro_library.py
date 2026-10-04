@@ -12,6 +12,7 @@ import os
 import shutil
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QInputDialog,
@@ -86,11 +87,12 @@ class MacroLibraryPanel(QWidget):
 
                 item = QListWidgetItem(fname)
                 item.setData(Qt.UserRole, full_path)
+                item.setForeground(QBrush(QColor("#0f172a")))
 
                 if is_locked:
                     lock_desc = f"🔒 Locked by {lock_info.user}" if lock_info else "🔒 Locked"
                     item.setText(f"{fname} ({lock_desc})")
-                    item.setForeground(Qt.red)
+                    item.setForeground(QBrush(QColor("#dc2626")))
 
                 self.list_widget.addItem(item)
 

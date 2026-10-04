@@ -225,7 +225,9 @@ class ActionTreeWidget(QWidget):
         setup_font = QFont()
         setup_font.setBold(True)
         setup_header.setFont(2, setup_font)
-        setup_header.setBackground(0, QBrush(QColor("#f1f5f9")))
+        for col in range(7):
+            setup_header.setBackground(col, QBrush(QColor("#f1f5f9")))
+            setup_header.setForeground(col, QBrush(QColor("#1e293b")))
         self.tree.addTopLevelItem(setup_header)
 
         for act in self._macro.setup:
@@ -237,7 +239,9 @@ class ActionTreeWidget(QWidget):
         per_row_header.setData(0, Qt.UserRole, "header_per_row")
         per_row_header.setFlags(Qt.ItemIsEnabled)
         per_row_header.setFont(2, setup_font)
-        per_row_header.setBackground(0, QBrush(QColor("#f1f5f9")))
+        for col in range(7):
+            per_row_header.setBackground(col, QBrush(QColor("#f1f5f9")))
+            per_row_header.setForeground(col, QBrush(QColor("#1e293b")))
         self.tree.addTopLevelItem(per_row_header)
 
         for act in self._macro.per_row:
@@ -249,7 +253,9 @@ class ActionTreeWidget(QWidget):
         cleanup_header.setData(0, Qt.UserRole, "header_cleanup")
         cleanup_header.setFlags(Qt.ItemIsEnabled)
         cleanup_header.setFont(2, setup_font)
-        cleanup_header.setBackground(0, QBrush(QColor("#f1f5f9")))
+        for col in range(7):
+            cleanup_header.setBackground(col, QBrush(QColor("#f1f5f9")))
+            cleanup_header.setForeground(col, QBrush(QColor("#1e293b")))
         self.tree.addTopLevelItem(cleanup_header)
 
         for act in self._macro.cleanup:
@@ -260,6 +266,7 @@ class ActionTreeWidget(QWidget):
         self.tree.blockSignals(False)
 
     def _add_action_node(self, parent: QTreeWidgetItem, act: ActionItem, counter: int) -> int:
+        text_color = QColor("#0f172a") if act.enabled else QColor("#94a3b8")
         if act.type == "group":
             group_item = QTreeWidgetItem([
                 "",
@@ -273,6 +280,8 @@ class ActionTreeWidget(QWidget):
             group_item.setData(0, Qt.UserRole, act)
             group_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsUserCheckable)
             group_item.setCheckState(1, Qt.Checked if act.enabled else Qt.Unchecked)
+            for col in range(7):
+                group_item.setForeground(col, QBrush(text_color))
             parent.addChild(group_item)
             group_item.setExpanded(not act.collapsed)
 
@@ -302,6 +311,8 @@ class ActionTreeWidget(QWidget):
             node.setData(0, Qt.UserRole, act)
             node.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsUserCheckable | Qt.ItemIsDragEnabled)
             node.setCheckState(1, Qt.Checked if act.enabled else Qt.Unchecked)
+            for col in range(7):
+                node.setForeground(col, QBrush(text_color))
             parent.addChild(node)
             return counter + 1
 
@@ -324,6 +335,9 @@ class ActionTreeWidget(QWidget):
             if isinstance(data, ActionItem):
                 is_checked = item.checkState(1) == Qt.Checked
                 data.enabled = is_checked
+                text_color = QColor("#0f172a") if is_checked else QColor("#94a3b8")
+                for col in range(7):
+                    item.setForeground(col, QBrush(text_color))
                 self.macro_modified.emit()
 
     def _on_search_changed(self, text: str) -> None:
@@ -334,7 +348,10 @@ class ActionTreeWidget(QWidget):
         self._is_compact = checked
         # Normal vs Compact row height adjustment
         padding = "2px" if checked else "6px"
-        self.tree.setStyleSheet(f"QTreeView::item {{ padding: {padding}; }}")
+        self.tree.setStyleSheet(
+            f"QTreeWidget {{ background-color: #ffffff; color: #0f172a; }} "
+            f"QTreeWidget::item {{ padding: {padding}; color: #0f172a; }}"
+        )
 
     def _apply_filter(self) -> None:
         root = self.tree.invisibleRootItem()
