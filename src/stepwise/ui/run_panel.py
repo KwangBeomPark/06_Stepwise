@@ -10,10 +10,11 @@ Specifications:
 from __future__ import annotations
 
 import ctypes
+import os
 from typing import Any
 
 from PySide6.QtCore import QPoint, Qt, Signal
-from PySide6.QtGui import QMouseEvent
+from PySide6.QtGui import QIcon, QMouseEvent
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -44,6 +45,10 @@ class FloatingRunPanel(QWidget):
             Qt.Window | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.WindowDoesNotAcceptFocus,
         )
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)
+
+        icon_path = os.path.join(os.path.dirname(__file__), "stepwise.ico")
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
 
         self._drag_pos: QPoint | None = None
         self._is_paused = False

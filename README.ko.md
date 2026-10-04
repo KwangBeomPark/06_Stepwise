@@ -1,6 +1,6 @@
 *다른 언어로 읽기: [한국어](README.ko.md), [English](README.md)*
 
-# Stepwise (스텝와이즈)
+# <img src="assets/icons/stepwise.png" width="36" height="36" valign="middle" alt="Stepwise Icon"> Stepwise (스텝와이즈)
 
 <p align="center">
   <img src="assets/images/stepwise-hero.png" width="950" alt="Stepwise - Windows 데이터 기반 매크로 자동화 도구">

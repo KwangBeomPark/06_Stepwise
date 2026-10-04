@@ -1,6 +1,6 @@
 *Read this in other languages: [English](README.md), [한국어](README.ko.md)*
 
-# Stepwise
+# <img src="assets/icons/stepwise.png" width="36" height="36" valign="middle" alt="Stepwise Icon"> Stepwise
 
 <p align="center">
   <img src="assets/images/stepwise-hero.png" width="950" alt="Stepwise - Windows Data-Driven Macro Automation Tool">

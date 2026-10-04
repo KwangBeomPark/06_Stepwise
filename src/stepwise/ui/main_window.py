@@ -17,7 +17,7 @@ import threading
 from typing import Any
 
 from PySide6.QtCore import QObject, Qt, Signal
-from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtGui import QAction, QIcon, QKeySequence
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
@@ -100,6 +100,11 @@ class MainWindow(QMainWindow):
         self._setup_ui()
         self._setup_shortcuts()
         self._update_status_bar_screen_info()
+
+        # Set window icon
+        icon_path = os.path.join(os.path.dirname(__file__), "stepwise.ico")
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
 
     def _setup_ui(self) -> None:
         # Toolbar

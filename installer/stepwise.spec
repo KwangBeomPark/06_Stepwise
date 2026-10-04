@@ -14,9 +14,17 @@ if not os.path.exists(os.path.join(project_root, 'src')):
 
 main_script = os.path.join(project_root, 'src', 'stepwise', '__main__.py')
 qss_file = os.path.join(project_root, 'src', 'stepwise', 'ui', 'styles.qss')
+icon_ico = os.path.join(project_root, 'assets', 'icons', 'stepwise.ico')
+icon_png = os.path.join(project_root, 'assets', 'icons', 'stepwise.png')
+ui_ico = os.path.join(project_root, 'src', 'stepwise', 'ui', 'stepwise.ico')
+ui_png = os.path.join(project_root, 'src', 'stepwise', 'ui', 'stepwise.png')
 
 added_files = [
     (qss_file, 'stepwise/ui'),
+    (icon_ico, 'assets/icons'),
+    (icon_png, 'assets/icons'),
+    (ui_ico, 'stepwise/ui'),
+    (ui_png, 'stepwise/ui'),
 ]
 
 # Exclude heavy unused Qt modules to keep onedir size compact
@@ -104,6 +112,7 @@ exe = EXE(
     [],
     exclude_binaries=True,
     name='Stepwise',
+    icon=icon_ico,
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
