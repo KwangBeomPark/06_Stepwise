@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 from stepwise.engine.timing import SpeedMode
+from stepwise.ui.strings import Strings
 
 # Win32 Constants
 WDA_EXCLUDEFROMCAPTURE = 0x00000011
@@ -42,7 +43,10 @@ class FloatingRunPanel(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(
             parent,
-            Qt.Window | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.WindowDoesNotAcceptFocus,
+            Qt.Window
+            | Qt.FramelessWindowHint
+            | Qt.WindowStaysOnTopHint
+            | Qt.WindowDoesNotAcceptFocus,
         )
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)
 
@@ -116,15 +120,24 @@ class FloatingRunPanel(QWidget):
         # Controls
         btn_layout = QHBoxLayout()
         self.btn_pause = QPushButton("⏸ Pause")
-        self.btn_pause.setStyleSheet("background-color: #d97706; color: white; padding: 4px 8px; font-weight: bold; border-radius: 4px;")
+        self.btn_pause.setToolTip(Strings.Tooltips.PAUSE)
+        self.btn_pause.setStyleSheet(
+            "background-color: #d97706; color: white; padding: 4px 8px; font-weight: bold; border-radius: 4px;"
+        )
         self.btn_pause.clicked.connect(self._toggle_pause)
 
         self.btn_stop = QPushButton("■ Stop")
-        self.btn_stop.setStyleSheet("background-color: #dc2626; color: white; padding: 4px 8px; font-weight: bold; border-radius: 4px;")
+        self.btn_stop.setToolTip(Strings.Tooltips.STOP)
+        self.btn_stop.setStyleSheet(
+            "background-color: #dc2626; color: white; padding: 4px 8px; font-weight: bold; border-radius: 4px;"
+        )
         self.btn_stop.clicked.connect(self.stop_clicked.emit)
 
         self.btn_next = QPushButton("Next ⏭")
-        self.btn_next.setStyleSheet("background-color: #2563eb; color: white; padding: 4px 8px; font-weight: bold; border-radius: 4px;")
+        self.btn_next.setToolTip(Strings.Tooltips.STEP_BY_STEP)
+        self.btn_next.setStyleSheet(
+            "background-color: #2563eb; color: white; padding: 4px 8px; font-weight: bold; border-radius: 4px;"
+        )
         self.btn_next.setVisible(False)
         self.btn_next.clicked.connect(self.next_step_clicked.emit)
 
@@ -182,7 +195,9 @@ class FloatingRunPanel(QWidget):
             else:
                 self._position_top_right()
 
-    def update_progress(self, row: int, total: int, step_desc: str, ok_cnt: int, failed_cnt: int) -> None:
+    def update_progress(
+        self, row: int, total: int, step_desc: str, ok_cnt: int, failed_cnt: int
+    ) -> None:
         self.lbl_row.setText(f"Row {row} / {total}")
         pct = int((row / max(1, total)) * 100)
         self.prog_bar.setValue(pct)

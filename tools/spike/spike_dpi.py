@@ -8,6 +8,13 @@ from __future__ import annotations
 import ctypes
 from ctypes import wintypes
 
+SM_CXSCREEN = 0
+SM_CYSCREEN = 1
+SM_CXVIRTUALSCREEN = 78
+SM_CYVIRTUALSCREEN = 79
+SM_CMONITORS = 80
+MONITOR_DEFAULTTOPRIMARY = 1
+
 
 def check_dpi_and_resolution() -> dict[str, object]:
     user32 = ctypes.windll.user32
@@ -30,11 +37,6 @@ def check_dpi_and_resolution() -> dict[str, object]:
         dpi_aware_mode = f"Fallback error: {e}"
 
     # Query metrics
-    SM_CXSCREEN = 0
-    SM_CYSCREEN = 1
-    SM_CXVIRTUALSCREEN = 78
-    SM_CYVIRTUALSCREEN = 79
-    SM_CMONITORS = 80
 
     primary_width = user32.GetSystemMetrics(SM_CXSCREEN)
     primary_height = user32.GetSystemMetrics(SM_CYSCREEN)
@@ -56,12 +58,13 @@ def check_dpi_and_resolution() -> dict[str, object]:
         elif shcore and hasattr(shcore, "GetDpiForMonitor"):
             # Primary monitor at (0, 0)
             point = wintypes.POINT(0, 0)
-            MONITOR_DEFAULTTOPRIMARY = 1
             h_mon = user32.MonitorFromPoint(point, MONITOR_DEFAULTTOPRIMARY)
             dpi_x_val = wintypes.UINT()
             dpi_y_val = wintypes.UINT()
             # MDT_EFFECTIVE_DPI = 0
-            res = shcore.GetDpiForMonitor(h_mon, 0, ctypes.byref(dpi_x_val), ctypes.byref(dpi_y_val))
+            res = shcore.GetDpiForMonitor(
+                h_mon, 0, ctypes.byref(dpi_x_val), ctypes.byref(dpi_y_val)
+            )
             if res == 0:
                 dpi_x = dpi_x_val.value
                 dpi_y = dpi_y_val.value

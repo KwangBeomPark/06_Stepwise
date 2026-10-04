@@ -89,18 +89,29 @@ class PropertiesPanel(QWidget):
         self.container_layout.addStretch()
 
     def _clear_container(self) -> None:
-        while self.container_layout.count():
-            item = self.container_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+        old_container = self.scroll.takeWidget()
+        if old_container:
+            old_container.hide()
+            for widget in old_container.findChildren(QWidget):
+                widget.blockSignals(True)
+            for name, value in list(vars(self).items()):
+                if isinstance(value, QWidget) and old_container.isAncestorOf(value):
+                    setattr(self, name, None)
+            old_container.deleteLater()
+        self.txt_text = None
+        self.container = QWidget()
+        self.container_layout = QVBoxLayout(self.container)
+        self.container_layout.setContentsMargins(0, 0, 0, 0)
+        self.container_layout.setSpacing(10)
+        self.scroll.setWidget(self.container)
 
     def set_action(self, action: ActionItem | None) -> None:
         """Bind an ActionItem to the editor."""
         self._current_action = action
-        self._clear_container()
         if not action:
             self._build_empty_state()
             return
+        self._clear_container()
 
         # 1. Common Settings
         common_box = QGroupBox("General Options")
@@ -119,7 +130,9 @@ class PropertiesPanel(QWidget):
         self.spin_wait_before = QDoubleSpinBox()
         self.spin_wait_before.setRange(0.0, 60.0)
         self.spin_wait_before.setSingleStep(0.1)
-        self.spin_wait_before.setValue(action.wait_before if action.wait_before is not None else 0.2)
+        self.spin_wait_before.setValue(
+            action.wait_before if action.wait_before is not None else 0.2
+        )
         self.spin_wait_before.valueChanged.connect(self._on_wait_before_changed)
         common_layout.addRow(Strings.WAIT_BEFORE, self.spin_wait_before)
 
@@ -132,16 +145,21 @@ class PropertiesPanel(QWidget):
         if action.type == "click":
             h_coords = QHBoxLayout()
             self.spin_x = QSpinBox()
-            self.spin_x.setRange(0, 9999)
+            self.spin_x.setRange(-99999, 99999)
             self.spin_x.setValue(action.x)
-            self.spin_x.valueChanged.connect(lambda v: setattr(action, "x", v) or self.property_changed.emit())
+            self.spin_x.valueChanged.connect(
+                lambda v: setattr(action, "x", v) or self.property_changed.emit()
+            )
 
             self.spin_y = QSpinBox()
-            self.spin_y.setRange(0, 9999)
+            self.spin_y.setRange(-99999, 99999)
             self.spin_y.setValue(action.y)
-            self.spin_y.valueChanged.connect(lambda v: setattr(action, "y", v) or self.property_changed.emit())
+            self.spin_y.valueChanged.connect(
+                lambda v: setattr(action, "y", v) or self.property_changed.emit()
+            )
 
             btn_pick = QPushButton(Strings.PICK_COORDS)
+            btn_pick.setToolTip(Strings.Tooltips.PICK_COORDS)
             btn_pick.clicked.connect(self.request_pick.emit)
 
             h_coords.addWidget(QLabel("X:"))
@@ -153,11 +171,11 @@ class PropertiesPanel(QWidget):
 
             h_helpers = QHBoxLayout()
             btn_show = QPushButton("📍 " + Strings.SHOW_ON_SCREEN)
-            btn_show.setToolTip("Temporarily display target position on screen with a red crosshair")
+            btn_show.setToolTip(Strings.Tooltips.SHOW_ON_SCREEN)
             btn_show.clicked.connect(lambda: self.request_show_crosshair.emit(action.x, action.y))
 
             btn_test_click = QPushButton("⚡ " + Strings.TEST_THIS_STEP)
-            btn_test_click.setToolTip("Test this click action immediately on screen")
+            btn_test_click.setToolTip(Strings.Tooltips.TEST_THIS_STEP)
             btn_test_click.clicked.connect(lambda: self.request_test_step.emit(action))
 
             h_helpers.addWidget(btn_show)
@@ -167,19 +185,25 @@ class PropertiesPanel(QWidget):
             self.cmb_button = QComboBox()
             self.cmb_button.addItems(["left", "right", "middle"])
             self.cmb_button.setCurrentText(action.button)
-            self.cmb_button.currentTextChanged.connect(lambda v: setattr(action, "button", v) or self.property_changed.emit())
+            self.cmb_button.currentTextChanged.connect(
+                lambda v: setattr(action, "button", v) or self.property_changed.emit()
+            )
             act_layout.addRow(Strings.BUTTON, self.cmb_button)
 
             self.spin_clicks = QSpinBox()
             self.spin_clicks.setRange(1, 2)
             self.spin_clicks.setValue(action.clicks)
-            self.spin_clicks.valueChanged.connect(lambda v: setattr(action, "clicks", v) or self.property_changed.emit())
+            self.spin_clicks.valueChanged.connect(
+                lambda v: setattr(action, "clicks", v) or self.property_changed.emit()
+            )
             act_layout.addRow(Strings.CLICKS, self.spin_clicks)
 
         elif action.type == "type_text":
             self.txt_text = QLineEdit(action.text)
             self.txt_text.setPlaceholderText("Enter text or {ColumnName}")
-            self.txt_text.textChanged.connect(lambda v: setattr(action, "text", v) or self.property_changed.emit())
+            self.txt_text.textChanged.connect(
+                lambda v: setattr(action, "text", v) or self.property_changed.emit()
+            )
 
             if self._available_headers:
                 variables = [f"{{{h}}}" for h in self._available_headers]
@@ -191,50 +215,63 @@ class PropertiesPanel(QWidget):
             act_layout.addRow(Strings.TEXT_TO_TYPE, self.txt_text)
 
             btn_test_type = QPushButton("⚡ " + Strings.TEST_THIS_STEP)
-            btn_test_type.setToolTip("Test typing this text immediately into the active field")
+            btn_test_type.setToolTip(Strings.Tooltips.TEST_THIS_STEP)
             btn_test_type.clicked.connect(lambda: self.request_test_step.emit(action))
             act_layout.addRow("Action Tools:", btn_test_type)
 
             self.cmb_mode = QComboBox()
             self.cmb_mode.addItems(["paste", "keystrokes"])
             self.cmb_mode.setCurrentText(action.mode)
-            self.cmb_mode.currentTextChanged.connect(lambda v: setattr(action, "mode", v) or self.property_changed.emit())
+            self.cmb_mode.currentTextChanged.connect(
+                lambda v: setattr(action, "mode", v) or self.property_changed.emit()
+            )
             act_layout.addRow(Strings.TYPE_MODE, self.cmb_mode)
 
             self.chk_select_all = QCheckBox(Strings.SELECT_ALL_FIRST)
             self.chk_select_all.setChecked(action.select_all_first)
-            self.chk_select_all.toggled.connect(lambda v: setattr(action, "select_all_first", v) or self.property_changed.emit())
+            self.chk_select_all.toggled.connect(
+                lambda v: setattr(action, "select_all_first", v) or self.property_changed.emit()
+            )
             act_layout.addRow(self.chk_select_all)
 
         elif action.type == "key":
             self.txt_keys = QLineEdit(action.keys)
             self.txt_keys.setPlaceholderText("e.g. enter, tab, ctrl+s, esc")
-            self.txt_keys.textChanged.connect(lambda v: setattr(action, "keys", v) or self.property_changed.emit())
+            self.txt_keys.textChanged.connect(
+                lambda v: setattr(action, "keys", v) or self.property_changed.emit()
+            )
             act_layout.addRow(Strings.KEYS_TO_PRESS, self.txt_keys)
 
             btn_test_key = QPushButton("⚡ " + Strings.TEST_THIS_STEP)
-            btn_test_key.setToolTip("Test pressing this key immediately")
+            btn_test_key.setToolTip(Strings.Tooltips.TEST_THIS_STEP)
             btn_test_key.clicked.connect(lambda: self.request_test_step.emit(action))
             act_layout.addRow("Action Tools:", btn_test_key)
 
             self.spin_repeat = QSpinBox()
             self.spin_repeat.setRange(1, 100)
             self.spin_repeat.setValue(action.repeat)
-            self.spin_repeat.valueChanged.connect(lambda v: setattr(action, "repeat", v) or self.property_changed.emit())
+            self.spin_repeat.valueChanged.connect(
+                lambda v: setattr(action, "repeat", v) or self.property_changed.emit()
+            )
             act_layout.addRow(Strings.REPEAT_COUNT, self.spin_repeat)
 
         elif action.type == "wait":
             self.spin_wait = QDoubleSpinBox()
             self.spin_wait.setRange(0.01, 3600.0)
             self.spin_wait.setValue(action.seconds)
-            self.spin_wait.valueChanged.connect(lambda v: setattr(action, "seconds", v) or self.property_changed.emit())
+            self.spin_wait.valueChanged.connect(
+                lambda v: setattr(action, "seconds", v) or self.property_changed.emit()
+            )
             act_layout.addRow(Strings.WAIT_SECONDS, self.spin_wait)
 
         elif action.type in ("click_image", "wait_image", "wait_image_gone"):
             h_img = QHBoxLayout()
             self.txt_image = QLineEdit(action.image or "")
-            self.txt_image.textChanged.connect(lambda v: setattr(action, "image", v) or self.property_changed.emit())
+            self.txt_image.textChanged.connect(
+                lambda v: setattr(action, "image", v) or self.property_changed.emit()
+            )
             btn_cap = QPushButton(Strings.CAPTURE_IMAGE)
+            btn_cap.setToolTip(Strings.Tooltips.CAPTURE_IMAGE)
             btn_cap.clicked.connect(self.request_capture.emit)
             h_img.addWidget(self.txt_image)
             h_img.addWidget(btn_cap)
@@ -243,23 +280,114 @@ class PropertiesPanel(QWidget):
             self.spin_timeout = QDoubleSpinBox()
             self.spin_timeout.setRange(0.1, 300.0)
             self.spin_timeout.setValue(action.timeout)
-            self.spin_timeout.valueChanged.connect(lambda v: setattr(action, "timeout", v) or self.property_changed.emit())
+            self.spin_timeout.valueChanged.connect(
+                lambda v: setattr(action, "timeout", v) or self.property_changed.emit()
+            )
             act_layout.addRow(Strings.TIMEOUT_SEC, self.spin_timeout)
 
             btn_test_match = QPushButton(Strings.TEST_MATCH)
+            btn_test_match.setToolTip(Strings.Tooltips.TEST_MATCH)
             btn_test_match.clicked.connect(lambda: self.request_test_match.emit(action))
             act_layout.addRow(btn_test_match)
 
         elif action.type == "group":
             self.txt_group_name = QLineEdit(action.name)
-            self.txt_group_name.textChanged.connect(lambda v: setattr(action, "name", v) or self.property_changed.emit())
+            self.txt_group_name.textChanged.connect(
+                lambda v: setattr(action, "name", v) or self.property_changed.emit()
+            )
             act_layout.addRow(Strings.GROUP_NAME, self.txt_group_name)
+
+        elif action.type == "window_set_bounds":
+            h_title = QHBoxLayout()
+            self.txt_win_title = QLineEdit(action.window_title)
+            self.txt_win_title.setPlaceholderText("Target window title (e.g. SAP, Excel, Chrome)")
+            self.txt_win_title.textChanged.connect(
+                lambda v: setattr(action, "window_title", v) or self.property_changed.emit()
+            )
+
+            btn_refresh_wins = QPushButton(Strings.WINDOW_PICK_BUTTON)
+            btn_refresh_wins.setToolTip(Strings.WINDOW_PICK_TOOLTIP)
+
+            def _pick_win_dialog() -> None:
+                from PySide6.QtWidgets import QInputDialog, QMessageBox
+
+                from stepwise.services.window_win import list_visible_windows
+
+                wins = list_visible_windows(exclude_self=True)
+                titles = [t for _, t in wins if t.strip()]
+                if not titles:
+                    QMessageBox.information(
+                        self,
+                        "No Windows Found",
+                        "No other visible application windows were detected.",
+                    )
+                    return
+                chosen, ok = QInputDialog.getItem(
+                    self, "Select Window", "Choose active application window:", titles, 0, False
+                )
+                if ok and chosen:
+                    self.txt_win_title.setText(chosen)
+
+            btn_refresh_wins.clicked.connect(_pick_win_dialog)
+            h_title.addWidget(self.txt_win_title)
+            h_title.addWidget(btn_refresh_wins)
+            act_layout.addRow(Strings.WINDOW_TITLE_LABEL, h_title)
+
+            h_pos = QHBoxLayout()
+            self.spin_win_x = QSpinBox()
+            self.spin_win_x.setRange(-9999, 9999)
+            self.spin_win_x.setValue(action.window_x)
+            self.spin_win_x.valueChanged.connect(
+                lambda v: setattr(action, "window_x", v) or self.property_changed.emit()
+            )
+
+            self.spin_win_y = QSpinBox()
+            self.spin_win_y.setRange(-9999, 9999)
+            self.spin_win_y.setValue(action.window_y)
+            self.spin_win_y.valueChanged.connect(
+                lambda v: setattr(action, "window_y", v) or self.property_changed.emit()
+            )
+
+            h_pos.addWidget(QLabel("X:"))
+            h_pos.addWidget(self.spin_win_x)
+            h_pos.addWidget(QLabel("Y:"))
+            h_pos.addWidget(self.spin_win_y)
+            act_layout.addRow(Strings.WINDOW_POS_LABEL, h_pos)
+
+            h_size = QHBoxLayout()
+            self.spin_win_w = QSpinBox()
+            self.spin_win_w.setRange(100, 9999)
+            self.spin_win_w.setValue(action.window_width)
+            self.spin_win_w.valueChanged.connect(
+                lambda v: setattr(action, "window_width", v) or self.property_changed.emit()
+            )
+
+            self.spin_win_h = QSpinBox()
+            self.spin_win_h.setRange(100, 9999)
+            self.spin_win_h.setValue(action.window_height)
+            self.spin_win_h.valueChanged.connect(
+                lambda v: setattr(action, "window_height", v) or self.property_changed.emit()
+            )
+
+            h_size.addWidget(QLabel("Width:"))
+            h_size.addWidget(self.spin_win_w)
+            h_size.addWidget(QLabel("Height:"))
+            h_size.addWidget(self.spin_win_h)
+            act_layout.addRow(Strings.WINDOW_SIZE_LABEL, h_size)
+
+            self.chk_win_max = QCheckBox(Strings.WINDOW_MAXIMIZE_LABEL)
+            self.chk_win_max.setChecked(action.window_maximize)
+            self.chk_win_max.toggled.connect(
+                lambda v: setattr(action, "window_maximize", v) or self.property_changed.emit()
+            )
+            act_layout.addRow("Mode:", self.chk_win_max)
 
         self.container_layout.addWidget(act_box)
 
         # 3. Action Buttons (Test this step)
         btn_layout = QHBoxLayout()
         btn_test = QPushButton(Strings.TEST_THIS_STEP)
+        btn_test.setToolTip(Strings.Tooltips.TEST_THIS_STEP)
         btn_test.clicked.connect(lambda: self.request_test_step.emit(action))
         btn_layout.addWidget(btn_test)
         self.container_layout.addLayout(btn_layout)

@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
@@ -17,6 +17,7 @@ import cv2
 
 from stepwise.engine.actions import _get_val, execute_action
 from stepwise.engine.errors import AbortRequested, StepFailure
+from stepwise.engine.results import ResultsManager, RowResultRecord, compute_row_hash
 from stepwise.engine.timing import ExecutionController, SpeedMode
 from stepwise.services.power import prevent_screen_sleep
 from stepwise.services.screen import capture_screen
@@ -37,6 +38,10 @@ class RunSummary:
     failure: StepFailure | None = None
     interrupted: bool = False
     screenshot_path: str | None = None
+    results_csv_path: str | None = None
+    pending_results_path: str | None = None
+    buffered_results: list[RowResultRecord] = field(default_factory=list)
+    persistence_errors: list[str] = field(default_factory=list)
 
 
 class ExecutionCallbacks:
@@ -88,6 +93,23 @@ def save_failure_screenshot(
     return None
 
 
+def _append_result(res_mgr: ResultsManager | None, record: RowResultRecord) -> None:
+    """Append row result record to ResultsManager safely.
+
+    The results CSV is often open in Excel (locked on Windows); a failed write
+    must not abort the macro or turn a completed row into a failure.
+    """
+    if res_mgr is None:
+        return
+    try:
+        res_mgr.append_record(record)
+    except Exception as e:
+        # Covers managers whose primary append method fails before its normal
+        # fallback handler runs. Completed automation must remain completed.
+        res_mgr.defer_record(record)
+        print(f"Warning: Failed to write {record.status} record for row {record.row_number}: {e}")
+
+
 def run_macro(
     macro: Any,
     rows_data: Sequence[dict[str, object]] | None = None,
@@ -102,6 +124,9 @@ def run_macro(
     results_dir: str = "results",
     package_dir: str | None = None,
     countdown_seconds: float = 0.0,
+    data_filepath: str | None = None,
+    row_numbers: Sequence[int] | None = None,
+    results_manager: ResultsManager | None = None,
 ) -> RunSummary:
     """Execute complete macro workflow."""
     ctrl = controller or ExecutionController()
@@ -117,19 +142,36 @@ def run_macro(
     per_row_items = _get_val(macro, "per_row") or []
     cleanup_items = _get_val(macro, "cleanup") or []
 
+    res_mgr = results_manager
+    if res_mgr is None and (data_filepath or rows_data is not None):
+        res_mgr = ResultsManager(
+            macro_name=macro_name,
+            data_filepath=data_filepath or "",
+            results_dir=results_dir,
+        )
+
     if rows_data is None or len(rows_data) == 0:
         effective_rows: list[dict[str, object]] = [{}]
     else:
         effective_rows = list(rows_data)
 
     total_available_rows = len(effective_rows)
-    end_idx = total_available_rows if end_row_index is None else min(end_row_index, total_available_rows)
+    end_idx = (
+        total_available_rows if end_row_index is None else min(end_row_index, total_available_rows)
+    )
     start_idx = max(0, min(start_row_index, total_available_rows))
 
     if run_1_row:
         target_rows = effective_rows[start_idx : start_idx + 1]
     else:
         target_rows = effective_rows[start_idx:end_idx]
+
+    if row_numbers is not None and len(row_numbers) > 0:
+        if len(row_numbers) != len(effective_rows):
+            raise ValueError("row_numbers must contain one entry for each data row")
+        target_row_numbers = list(row_numbers[start_idx : start_idx + len(target_rows)])
+    else:
+        target_row_numbers = [start_idx + i + 1 for i in range(len(target_rows))]
 
     start_time = time.time()
     started_at_str = datetime.now().isoformat()
@@ -148,6 +190,10 @@ def run_macro(
     is_interrupted = False
     screenshot_saved: str | None = None
     last_row_num: int | None = None
+    current_row_started_at = ""
+    current_row_start_time = 0.0
+    current_row_hash = ""
+    current_row_active = False
 
     with prevent_screen_sleep():
         try:
@@ -177,8 +223,25 @@ def run_macro(
             # 2. PER-ROW SECTION (Iterates through rows)
             for offset, row in enumerate(target_rows):
                 ctrl.check_abort()
-                row_num = start_idx + offset + 1
+                row_num = target_row_numbers[offset]
                 last_row_num = row_num
+                current_row_started_at = datetime.now().isoformat()
+                current_row_start_time = time.time()
+                current_row_hash = compute_row_hash(row)
+                current_row_active = True
+
+                _append_result(
+                    res_mgr,
+                    RowResultRecord(
+                        run_id=run_id,
+                        row_number=row_num,
+                        row_hash=current_row_hash,
+                        status="Running",
+                        started_at=current_row_started_at,
+                        macro_name=macro_name,
+                        speed=speed.value,
+                    ),
+                )
 
                 if cbs.on_row_started:
                     cbs.on_row_started(row_num, row)
@@ -205,6 +268,23 @@ def run_macro(
                         cbs.on_step_finished(step_id, step_note)
 
                 done_count += 1
+                current_row_active = False
+                row_dur = round(time.time() - current_row_start_time, 2)
+                _append_result(
+                    res_mgr,
+                    RowResultRecord(
+                        run_id=run_id,
+                        row_number=row_num,
+                        row_hash=current_row_hash,
+                        status="Done",
+                        started_at=current_row_started_at,
+                        finished_at=datetime.now().isoformat(),
+                        duration_sec=str(row_dur),
+                        macro_name=macro_name,
+                        speed=speed.value,
+                    ),
+                )
+
                 if cbs.on_row_finished:
                     cbs.on_row_finished(row_num, "Done")
 
@@ -237,20 +317,70 @@ def run_macro(
         except AbortRequested:
             is_interrupted = True
             interrupted_count += 1
-            if last_row_num is not None and cbs.on_row_finished:
-                cbs.on_row_finished(last_row_num, "Interrupted")
+            if current_row_active and last_row_num is not None:
+                row_dur = (
+                    round(time.time() - current_row_start_time, 2)
+                    if current_row_start_time > 0
+                    else 0.0
+                )
+                _append_result(
+                    res_mgr,
+                    RowResultRecord(
+                        run_id=run_id,
+                        row_number=last_row_num,
+                        row_hash=current_row_hash,
+                        status="Interrupted",
+                        reason="Execution stopped by user",
+                        started_at=current_row_started_at,
+                        finished_at=datetime.now().isoformat(),
+                        duration_sec=str(row_dur),
+                        macro_name=macro_name,
+                        speed=speed.value,
+                    ),
+                )
+                if cbs.on_row_finished:
+                    cbs.on_row_finished(last_row_num, "Interrupted")
+                current_row_active = False
 
         except StepFailure as e:
             failure = e
             failed_count += 1
+            target_fail_row = e.row_number
+            if target_fail_row is None and current_row_active:
+                target_fail_row = last_row_num
             screenshot_saved = save_failure_screenshot(
                 results_dir=results_dir,
                 run_id=run_id,
-                row_number=e.row_number or last_row_num,
+                row_number=target_fail_row,
                 step_id=e.step_id,
             )
-            if last_row_num is not None and cbs.on_row_finished:
-                cbs.on_row_finished(last_row_num, "Failed")
+            if target_fail_row is not None:
+                row_dur = (
+                    round(time.time() - current_row_start_time, 2)
+                    if current_row_start_time > 0
+                    else 0.0
+                )
+                _append_result(
+                    res_mgr,
+                    RowResultRecord(
+                        run_id=run_id,
+                        row_number=target_fail_row,
+                        row_hash=current_row_hash,
+                        status="Failed",
+                        failed_step_id=e.step_id or "",
+                        failed_step_label=e.step_label or "",
+                        reason=e.message,
+                        screenshot=screenshot_saved or "",
+                        started_at=current_row_started_at,
+                        finished_at=datetime.now().isoformat(),
+                        duration_sec=str(row_dur),
+                        macro_name=macro_name,
+                        speed=speed.value,
+                    ),
+                )
+                if cbs.on_row_finished:
+                    cbs.on_row_finished(target_fail_row, "Failed")
+                current_row_active = False
             if cbs.on_run_failed:
                 cbs.on_run_failed(e, screenshot_saved)
 
@@ -268,8 +398,31 @@ def run_macro(
                 row_number=last_row_num,
                 step_id=None,
             )
-            if last_row_num is not None and cbs.on_row_finished:
-                cbs.on_row_finished(last_row_num, "Failed")
+            if current_row_active and last_row_num is not None:
+                row_dur = (
+                    round(time.time() - current_row_start_time, 2)
+                    if current_row_start_time > 0
+                    else 0.0
+                )
+                _append_result(
+                    res_mgr,
+                    RowResultRecord(
+                        run_id=run_id,
+                        row_number=last_row_num,
+                        row_hash=current_row_hash,
+                        status="Failed",
+                        reason=str(e),
+                        screenshot=screenshot_saved or "",
+                        started_at=current_row_started_at,
+                        finished_at=datetime.now().isoformat(),
+                        duration_sec=str(row_dur),
+                        macro_name=macro_name,
+                        speed=speed.value,
+                    ),
+                )
+                if cbs.on_row_finished:
+                    cbs.on_row_finished(last_row_num, "Failed")
+                current_row_active = False
             if cbs.on_run_failed:
                 cbs.on_run_failed(wrapped, screenshot_saved)
 
@@ -290,6 +443,12 @@ def run_macro(
         failure=failure,
         interrupted=is_interrupted,
         screenshot_path=screenshot_saved,
+        results_csv_path=res_mgr.csv_path if res_mgr else None,
+        pending_results_path=(
+            res_mgr.pending_csv_path if res_mgr and res_mgr._use_pending else None
+        ),
+        buffered_results=list(res_mgr.pending_records) if res_mgr else [],
+        persistence_errors=list(res_mgr.persistence_errors) if res_mgr else [],
     )
 
     if cbs.on_run_finished:

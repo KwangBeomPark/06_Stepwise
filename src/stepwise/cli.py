@@ -47,7 +47,9 @@ def main() -> None:
     )
     run_parser.add_argument("--skip-setup", action="store_true", help="Skip Setup section")
     run_parser.add_argument("--skip-cleanup", action="store_true", help="Skip Cleanup section")
-    run_parser.add_argument("--run-1-row", action="store_true", help="Run only the first target row")
+    run_parser.add_argument(
+        "--run-1-row", action="store_true", help="Run only the first target row"
+    )
     run_parser.add_argument("--countdown", type=float, default=2.0, help="Initial countdown delay")
 
     args = parser.parse_args()

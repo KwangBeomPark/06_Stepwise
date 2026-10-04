@@ -23,7 +23,9 @@ from PySide6.QtWidgets import (
 
 
 class SettingsDialog(QDialog):
-    def __init__(self, settings_dict: dict[str, object] | None = None, parent: QWidget | None = None) -> None:
+    def __init__(
+        self, settings_dict: dict[str, object] | None = None, parent: QWidget | None = None
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Stepwise Settings")
         self.resize(520, 420)
@@ -102,7 +104,9 @@ class SettingsDialog(QDialog):
         tab_about = QWidget()
         layout_about = QVBoxLayout(tab_about)
         layout_about.setSpacing(10)
-        lbl_about = QLabel("<b>Stepwise v0.1.0</b><br>Windows Data-Driven Macro Automation Tool.<br>Enterprise-ready, Non-admin execution.")
+        lbl_about = QLabel(
+            "<b>Stepwise v0.1.0</b><br>Windows Data-Driven Macro Automation Tool.<br>Enterprise-ready, Non-admin execution."
+        )
         lbl_about.setTextFormat(Qt.RichText)
         layout_about.addWidget(lbl_about)
 

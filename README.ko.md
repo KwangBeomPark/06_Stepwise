@@ -1,4 +1,4 @@
-*다른 언어로 읽기: [한국어](README.ko.md), [English](README.md)*
+*다른 언어로 읽기: [한국어](README.ko.md), [English](README.md) | 📖 **사용자 매뉴얼**: [한국어 매뉴얼](docs/manual/USER_MANUAL.ko.md) · [English Manual](docs/manual/USER_MANUAL.md) · [Instrukcja Polski](docs/manual/USER_MANUAL.pl.md)*
 
 # <img src="assets/icons/stepwise.png" width="36" height="36" valign="middle" alt="Stepwise Icon"> Stepwise (스텝와이즈)
 

@@ -43,6 +43,10 @@ def collect_referenced_variables(macro: Macro) -> list[str]:
                 for v in extract_variable_names(it.text):
                     if v not in var_names:
                         var_names.append(v)
+            elif it.type == "window_set_bounds" and it.window_title:
+                for v in extract_variable_names(it.window_title):
+                    if v not in var_names:
+                        var_names.append(v)
             elif it.type == "group" and it.items:
                 _scan(it.items)
 
@@ -67,13 +71,19 @@ def run_preflight_checks(
     try:
         validate_macro_dict(macro.to_dict())
     except Exception as e:
-        issues.append(PreflightIssue(level="ERROR", message="Macro structure is invalid.", details=str(e)))
+        issues.append(
+            PreflightIssue(level="ERROR", message="Macro structure is invalid.", details=str(e))
+        )
 
     # 2. Check Image Files Existence (🔴 ERROR)
     def _check_image(path: str | None, ctx: str) -> None:
         if not path:
             return
-        resolved = os.path.normpath(os.path.join(package_dir or "", path)) if not os.path.isabs(path) else path
+        resolved = (
+            os.path.normpath(os.path.join(package_dir or "", path))
+            if not os.path.isabs(path)
+            else path
+        )
         if not os.path.exists(resolved):
             issues.append(
                 PreflightIssue(
@@ -122,7 +132,9 @@ def run_preflight_checks(
                 )
 
             # 4. Check for Empty Values in Required Columns (🔴 ERROR)
-            blank_rows_by_col: dict[str, list[int]] = {v: [] for v in ref_vars if v in available_cols}
+            blank_rows_by_col: dict[str, list[int]] = {
+                v: [] for v in ref_vars if v in available_cols
+            }
             effective_row_nums = row_numbers or list(range(1, len(rows_data) + 1))
 
             for idx, r in enumerate(rows_data):
@@ -204,8 +216,7 @@ def run_preflight_checks(
         # Check for previous failed/interrupted rows
         past_statuses = res_mgr.load_latest_row_statuses()
         unresolved = [
-            r_num for r_num, rec in past_statuses.items()
-            if rec.status in ("Failed", "Interrupted")
+            r_num for r_num, rec in past_statuses.items() if rec.status in ("Failed", "Interrupted")
         ]
         if unresolved:
             issues.append(

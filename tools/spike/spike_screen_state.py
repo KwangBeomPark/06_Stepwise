@@ -9,7 +9,9 @@ import mss
 import numpy as np
 
 
-def is_screen_black_or_unavailable(threshold_mean: float = 2.0, threshold_std: float = 1.0) -> dict[str, object]:
+def is_screen_black_or_unavailable(
+    threshold_mean: float = 2.0, threshold_std: float = 1.0
+) -> dict[str, object]:
     try:
         with mss.mss() as sct:
             monitors = sct.monitors

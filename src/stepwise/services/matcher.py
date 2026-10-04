@@ -57,10 +57,15 @@ def match_template_in_frame(
     template: np.ndarray,
     region: Sequence[int] | None = None,
     confidence_threshold: float = 0.95,
+    *,
+    frame_is_region: bool | None = None,
 ) -> MatchResult:
     """Match template in frame using TM_CCOEFF_NORMED.
 
-    Returns MatchResult with physical screen coordinates.
+    Returns MatchResult with physical screen coordinates. ``frame_is_region``
+    disambiguates a full-screen frame from one captured with
+    ``capture_screen(region=region)``. When omitted, matching dimensions are
+    treated as a pre-cropped frame for backward compatibility.
     """
     if len(frame.shape) == 3:
         if frame.shape[2] == 4:
@@ -96,13 +101,20 @@ def match_template_in_frame(
     offset_x, offset_y = 0, 0
     if region is not None:
         rx, ry, rw, rh = region
-        h_f, w_f = gray_frame.shape
-        x1 = max(0, min(rx, w_f - 1))
-        y1 = max(0, min(ry, h_f - 1))
-        x2 = max(x1 + 1, min(rx + rw, w_f))
-        y2 = max(y1 + 1, min(ry + rh, h_f))
-        gray_frame = gray_frame[y1:y2, x1:x2]
-        offset_x, offset_y = x1, y1
+        h_f, w_f = gray_frame.shape[:2]
+        if frame_is_region is None:
+            frame_is_region = w_f == rw and h_f == rh
+
+        if frame_is_region:
+            # Frame was already cropped to region (e.g. by capture_screen(region=region))
+            offset_x, offset_y = rx, ry
+        else:
+            x1 = max(0, min(rx, w_f - 1))
+            y1 = max(0, min(ry, h_f - 1))
+            x2 = max(x1 + 1, min(rx + rw, w_f))
+            y2 = max(y1 + 1, min(ry + rh, h_f))
+            gray_frame = gray_frame[y1:y2, x1:x2]
+            offset_x, offset_y = x1, y1
 
     fh, fw = gray_frame.shape[:2]
 
@@ -144,6 +156,23 @@ def match_template_in_frame(
     )
 
 
+def find_image_on_screen(
+    template_path: str,
+    confidence: float = 0.95,
+    region: Sequence[int] | None = None,
+) -> MatchResult:
+    """Capture screen and perform a single template match."""
+    template = load_template_image(template_path)
+    frame = capture_screen(region=region)
+    return match_template_in_frame(
+        frame,
+        template,
+        region=region,
+        confidence_threshold=confidence,
+        frame_is_region=region is not None,
+    )
+
+
 def poll_until_found(
     template_path: str,
     timeout: float = 10.0,
@@ -169,7 +198,13 @@ def poll_until_found(
             controller.check_abort(row_number)
 
         frame = capture_screen(region=region)
-        res = match_template_in_frame(frame, template, region=region, confidence_threshold=confidence)
+        res = match_template_in_frame(
+            frame,
+            template,
+            region=region,
+            confidence_threshold=confidence,
+            frame_is_region=region is not None,
+        )
         last_res = res
         if res.confidence > best_seen_match:
             best_seen_match = res.confidence
@@ -233,7 +268,13 @@ def poll_until_disappears(
         if controller:
             controller.check_abort(row_number)
         frame = capture_screen(region=region)
-        res = match_template_in_frame(frame, template, region=region, confidence_threshold=confidence)
+        res = match_template_in_frame(
+            frame,
+            template,
+            region=region,
+            confidence_threshold=confidence,
+            frame_is_region=region is not None,
+        )
         if res.found:
             has_appeared = True
             break
@@ -244,7 +285,13 @@ def poll_until_disappears(
 
     if appear_grace == 0.0 and not has_appeared:
         frame = capture_screen(region=region)
-        res = match_template_in_frame(frame, template, region=region, confidence_threshold=confidence)
+        res = match_template_in_frame(
+            frame,
+            template,
+            region=region,
+            confidence_threshold=confidence,
+            frame_is_region=region is not None,
+        )
         if not res.found:
             if after_gone > 0:
                 if controller:
@@ -259,7 +306,13 @@ def poll_until_disappears(
         if controller:
             controller.check_abort(row_number)
         frame = capture_screen(region=region)
-        res = match_template_in_frame(frame, template, region=region, confidence_threshold=confidence)
+        res = match_template_in_frame(
+            frame,
+            template,
+            region=region,
+            confidence_threshold=confidence,
+            frame_is_region=region is not None,
+        )
         best_seen_match = res.confidence
 
         if not res.found:

@@ -348,3 +348,13 @@ QScrollBar::handle:horizontal:hover {
 QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
     width: 0px;
 }
+
+/* Tooltips */
+QToolTip {
+    background-color: #1e293b;
+    color: #f8fafc;
+    border: 1px solid #334155;
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 12px;
+}

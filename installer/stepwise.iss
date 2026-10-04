@@ -2,7 +2,7 @@
 ; Installs into user local appdata without administrator privileges.
 
 #define MyAppName "Stepwise"
-#define MyAppVersion "0.1.0"
+#define MyAppVersion "0.2.0"
 #define MyAppPublisher "Stepwise Team"
 #define MyAppExeName "Stepwise.exe"
 

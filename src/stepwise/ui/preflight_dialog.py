@@ -11,6 +11,7 @@ Displays:
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Any
 
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
@@ -56,6 +57,7 @@ class PreflightDialog(QDialog):
         self.macro = macro
         self.rows_data = rows_data
         self.row_numbers = row_numbers or []
+        self.confirmed_opts: dict[str, Any] = {}
         self._countdown_remaining = 5
         self._countdown_timer = QTimer(self)
         self._countdown_timer.timeout.connect(self._on_countdown_tick)
@@ -66,8 +68,14 @@ class PreflightDialog(QDialog):
 
         # 1. Title & Meta
         total_rows = len(rows_data) if rows_data else 1
-        data_name = f'"{macro.data_source.file_hint}"' if macro.data_source and macro.data_source.file_hint else "No Data"
-        info_lbl = QLabel(f"<b>Macro:</b> {macro.name} &nbsp;|&nbsp; <b>Data:</b> {data_name} ({total_rows} rows)")
+        data_name = (
+            f'"{macro.data_source.file_hint}"'
+            if macro.data_source and macro.data_source.file_hint
+            else "No Data"
+        )
+        info_lbl = QLabel(
+            f"<b>Macro:</b> {macro.name} &nbsp;|&nbsp; <b>Data:</b> {data_name} ({total_rows} rows)"
+        )
         main_layout.addWidget(info_lbl)
 
         # 2. Preflight Checks List
@@ -145,7 +153,9 @@ class PreflightDialog(QDialog):
         self.btn_run_1_row.clicked.connect(lambda: self._confirm(run_1_row=True))
 
         self.btn_start = QPushButton("Start Run")
-        self.btn_start.setStyleSheet("background-color: #16a34a; color: white; font-weight: bold; padding: 8px 20px;")
+        self.btn_start.setStyleSheet(
+            "background-color: #16a34a; color: white; font-weight: bold; padding: 8px 20px;"
+        )
         self.btn_start.clicked.connect(self._start_countdown)
 
         self.btn_cancel = QPushButton("Cancel")
@@ -221,6 +231,7 @@ class PreflightDialog(QDialog):
             "step_by_step": self.chk_step_by_step.isChecked(),
             "run_1_row": run_1_row,
         }
+        self.confirmed_opts = opts
         self.run_confirmed.emit(opts)
         self.accept()
 

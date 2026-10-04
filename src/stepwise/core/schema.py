@@ -15,6 +15,7 @@ VALID_ACTION_TYPES = {
     "wait",
     "wait_image",
     "wait_image_gone",
+    "window_set_bounds",
     "group",
 }
 

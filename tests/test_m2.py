@@ -61,9 +61,7 @@ def test_schema_rejects_nested_groups() -> None:
             {
                 "type": "group",
                 "name": "Outer",
-                "items": [
-                    {"type": "group", "name": "Inner", "items": []}
-                ],
+                "items": [{"type": "group", "name": "Inner", "items": []}],
             }
         ],
     }
@@ -124,7 +122,9 @@ def test_data_source_xlsx_reading(tmp_path: os.PathLike[str]) -> None:
 
 
 def test_results_csv_flush_and_resume(tmp_path: os.PathLike[str]) -> None:
-    res_mgr = ResultsManager("TestMacro", os.path.join(tmp_path, "data.csv"), results_dir=str(tmp_path))
+    res_mgr = ResultsManager(
+        "TestMacro", os.path.join(tmp_path, "data.csv"), results_dir=str(tmp_path)
+    )
 
     # Append first row Done
     r1 = RowResultRecord(run_id="run1", row_number=1, row_hash="hash1", status="Done")
@@ -176,7 +176,7 @@ def test_preflight_checks_diagnostics(tmp_path: os.PathLike[str]) -> None:
     # Should detect: missing image, empty Vendor on row 2
     err_msgs = [e.message for e in errors]
     assert any("missing.png" in m for m in err_msgs)
-    assert any('contains empty values' in m for m in err_msgs)
+    assert any("contains empty values" in m for m in err_msgs)
 
     # Warnings should include screen mismatch (1600x900 vs actual screen)
     warn_msgs = [w.message for w in warnings]

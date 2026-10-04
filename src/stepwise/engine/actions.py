@@ -137,7 +137,14 @@ def execute_action(
     guard = _get_val(action, "guard")
     if guard and act_type not in ("click_image", "wait_image", "wait_image_gone"):
         execute_guard_or_verify(
-            guard, "Guard", package_dir, controller, default_confidence, step_id, step_label, row_number
+            guard,
+            "Guard",
+            package_dir,
+            controller,
+            default_confidence,
+            step_id,
+            step_label,
+            row_number,
         )
 
     # 4. Action Execution
@@ -146,7 +153,13 @@ def execute_action(
         y = int(_get_val(action, "y", 0))
         btn = _get_val(action, "button", "left")
         clicks = int(_get_val(action, "clicks", 1))
-        click_at(x, y, button=btn, clicks=clicks)
+        if not click_at(x, y, button=btn, clicks=clicks):
+            raise StepFailure(
+                message="The mouse could not reach or click the target. Check the screen coordinates and application permissions.",
+                step_id=step_id,
+                step_label=step_label,
+                row_number=row_number,
+            )
 
     elif act_type == "click_image":
         img_rel = _get_val(action, "image")
@@ -173,7 +186,13 @@ def execute_action(
         )
         target_x = res.center_x + offset_x
         target_y = res.center_y + offset_y
-        click_at(target_x, target_y, button=btn, clicks=clicks)
+        if not click_at(target_x, target_y, button=btn, clicks=clicks):
+            raise StepFailure(
+                message="The mouse could not reach or click the matched image. Check the screen coordinates and application permissions.",
+                step_id=step_id,
+                step_label=step_label,
+                row_number=row_number,
+            )
 
     elif act_type == "type_text":
         raw_text = str(_get_val(action, "text", ""))
@@ -181,17 +200,27 @@ def execute_action(
         mode = _get_val(action, "mode", "paste").lower()
         select_all = bool(_get_val(action, "select_all_first", False))
 
-        if select_all:
-            press_keys("ctrl+a")
-            if controller:
-                controller.wait(0.04, row_number)
-            else:
-                time.sleep(0.04)
+        def select_all_if_requested() -> None:
+            if select_all:
+                press_keys("ctrl+a")
+                if controller:
+                    controller.wait(0.04, row_number)
+                else:
+                    time.sleep(0.04)
 
         if mode == "keystrokes":
+            select_all_if_requested()
             type_unicode_string(text_to_type)
         else:
-            with temporary_clipboard_text(text_to_type, restore=True):
+            with temporary_clipboard_text(text_to_type, restore=True) as written:
+                if not written:
+                    raise StepFailure(
+                        message="Could not write text to the clipboard. Close other clipboard tools and try again.",
+                        step_id=step_id,
+                        step_label=step_label,
+                        row_number=row_number,
+                    )
+                select_all_if_requested()
                 press_keys("ctrl+v")
                 if controller:
                     controller.wait(0.05, row_number)
@@ -255,9 +284,64 @@ def execute_action(
             row_number=row_number,
         )
 
+    elif act_type == "window_set_bounds":
+        title_raw = str(_get_val(action, "window_title", "")).strip()
+        if not title_raw:
+            raise StepFailure(
+                "Target window title cannot be empty. Please specify the window title to align.",
+                step_id=step_id,
+                step_label=step_label,
+                row_number=row_number,
+            )
+
+        try:
+            title = substitute_variables(title_raw, row_data or {}, strict=True)
+        except Exception as e:
+            raise StepFailure(
+                f"Variable substitution failed in window title '{title_raw}': {e}",
+                step_id=step_id,
+                step_label=step_label,
+                row_number=row_number,
+            ) from e
+
+        x = int(_get_val(action, "window_x", 0))
+        y = int(_get_val(action, "window_y", 0))
+        width = int(_get_val(action, "window_width", 1280))
+        height = int(_get_val(action, "window_height", 800))
+        maximize = bool(_get_val(action, "window_maximize", False))
+
+        from stepwise.services.window_win import find_window_by_title, set_window_bounds
+
+        hwnd = find_window_by_title(title)
+        if not hwnd:
+            raise StepFailure(
+                f"Target window matching '{title}' was not found on screen.",
+                step_id=step_id,
+                step_label=step_label,
+                row_number=row_number,
+            )
+
+        ok, err_msg = set_window_bounds(
+            hwnd, x=x, y=y, width=width, height=height, maximize=maximize
+        )
+        if not ok:
+            raise StepFailure(
+                f"Failed to set bounds for window '{title}': {err_msg}",
+                step_id=step_id,
+                step_label=step_label,
+                row_number=row_number,
+            )
+
     # 5. Verify (for non-image actions)
     verify = _get_val(action, "verify")
     if verify and act_type not in ("click_image", "wait_image", "wait_image_gone"):
         execute_guard_or_verify(
-            verify, "Verify", package_dir, controller, default_confidence, step_id, step_label, row_number
+            verify,
+            "Verify",
+            package_dir,
+            controller,
+            default_confidence,
+            step_id,
+            step_label,
+            row_number,
         )

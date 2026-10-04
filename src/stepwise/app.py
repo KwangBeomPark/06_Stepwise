@@ -42,13 +42,16 @@ def main() -> None:
     if sys.platform == "win32":
         try:
             import ctypes
+
             app_id = "stepwise.desktop.macro.automation.0.1.0"
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
         except Exception:
             pass
 
     # Enable High DPI scaling
-    QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
+    QApplication.setHighDpiScaleFactorRoundingPolicy(
+        Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+    )
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("Stepwise")
     app.setOrganizationName("Stepwise")
@@ -81,7 +84,9 @@ def main() -> None:
     palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text, QColor("#94a3b8"))
     palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.ButtonText, QColor("#94a3b8"))
     palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Highlight, QColor("#e2e8f0"))
-    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.HighlightedText, QColor("#94a3b8"))
+    palette.setColor(
+        QPalette.ColorGroup.Disabled, QPalette.ColorRole.HighlightedText, QColor("#94a3b8")
+    )
     app.setPalette(palette)
 
     # Load custom QSS stylesheet

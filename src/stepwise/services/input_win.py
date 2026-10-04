@@ -29,6 +29,11 @@ MOUSEEVENTF_MIDDLEUP = 0x0040
 MOUSEEVENTF_ABSOLUTE = 0x8000
 MOUSEEVENTF_VIRTUALDESK = 0x4000
 
+SM_XVIRTUALSCREEN = 76
+SM_YVIRTUALSCREEN = 77
+SM_CXVIRTUALSCREEN = 78
+SM_CYVIRTUALSCREEN = 79
+
 # Keyboard flags
 KEYEVENTF_EXTENDEDKEY = 0x0001
 KEYEVENTF_KEYUP = 0x0002
@@ -147,9 +152,20 @@ def send_inputs(inputs: Sequence[INPUT]) -> int:
 
 def move_mouse(x: int, y: int) -> bool:
     """Move mouse cursor to absolute physical screen coordinates (x, y)."""
-    screen_w, screen_h = get_screen_size()
-    norm_x = int((x * 65535) / (screen_w - 1)) if screen_w > 1 else 0
-    norm_y = int((y * 65535) / (screen_h - 1)) if screen_h > 1 else 0
+    try:
+        user32.SetProcessDPIAware()
+    except Exception:
+        pass
+    left = user32.GetSystemMetrics(SM_XVIRTUALSCREEN)
+    top = user32.GetSystemMetrics(SM_YVIRTUALSCREEN)
+    screen_w = user32.GetSystemMetrics(SM_CXVIRTUALSCREEN)
+    screen_h = user32.GetSystemMetrics(SM_CYVIRTUALSCREEN)
+    if screen_w <= 0 or screen_h <= 0:
+        return False
+    if not (left <= x < left + screen_w and top <= y < top + screen_h):
+        return False
+    norm_x = int(((x - left) * 65535) / (screen_w - 1)) if screen_w > 1 else 0
+    norm_y = int(((y - top) * 65535) / (screen_h - 1)) if screen_h > 1 else 0
 
     inp = INPUT()
     inp.type = INPUT_MOUSE
@@ -167,7 +183,8 @@ def click_at(
     settle_delay: float = 0.04,
 ) -> bool:
     """Move cursor to (x, y), wait settle_delay (30-50ms), and click 1 or 2 times."""
-    move_mouse(x, y)
+    if not move_mouse(x, y):
+        return False
     time.sleep(settle_delay)
 
     btn = button.lower()
@@ -186,7 +203,7 @@ def click_at(
         inp_up.u.mi.dwFlags = up_flag
         inputs.extend([inp_down, inp_up])
 
-    return send_inputs(inputs) > 0
+    return bool(inputs) and send_inputs(inputs) == len(inputs)
 
 
 def parse_key_combination(keys_str: str) -> list[int]:

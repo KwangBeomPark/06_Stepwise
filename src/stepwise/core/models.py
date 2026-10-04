@@ -156,6 +156,14 @@ class ActionItem:
     # Wait parameters
     seconds: float = 1.0
 
+    # Window bounds parameters (Window alignment / resize)
+    window_title: str = ""
+    window_x: int = 0
+    window_y: int = 0
+    window_width: int = 1280
+    window_height: int = 800
+    window_maximize: bool = False
+
     # Group container parameters
     name: str = ""
     collapsed: bool = False
@@ -179,47 +187,68 @@ class ActionItem:
         if self.type == "click":
             data.update({"x": self.x, "y": self.y, "button": self.button, "clicks": self.clicks})
         elif self.type == "click_image":
-            data.update({
-                "image": self.image,
-                "region": self.region,
-                "confidence": self.confidence,
-                "timeout": self.timeout,
-                "offset_x": self.offset_x,
-                "offset_y": self.offset_y,
-                "button": self.button,
-                "clicks": self.clicks,
-                "after_found": self.after_found,
-            })
+            data.update(
+                {
+                    "image": self.image,
+                    "region": self.region,
+                    "confidence": self.confidence,
+                    "timeout": self.timeout,
+                    "offset_x": self.offset_x,
+                    "offset_y": self.offset_y,
+                    "button": self.button,
+                    "clicks": self.clicks,
+                    "after_found": self.after_found,
+                }
+            )
         elif self.type == "type_text":
-            data.update({"text": self.text, "mode": self.mode, "select_all_first": self.select_all_first})
+            data.update(
+                {"text": self.text, "mode": self.mode, "select_all_first": self.select_all_first}
+            )
         elif self.type == "key":
             data.update({"keys": self.keys, "repeat": self.repeat})
         elif self.type == "wait":
             data.update({"seconds": self.seconds})
         elif self.type == "wait_image":
-            data.update({
-                "image": self.image,
-                "region": self.region,
-                "confidence": self.confidence,
-                "timeout": self.timeout,
-                "after_found": self.after_found,
-                "stable_for": self.stable_for,
-            })
+            data.update(
+                {
+                    "image": self.image,
+                    "region": self.region,
+                    "confidence": self.confidence,
+                    "timeout": self.timeout,
+                    "after_found": self.after_found,
+                    "stable_for": self.stable_for,
+                }
+            )
         elif self.type == "wait_image_gone":
-            data.update({
-                "image": self.image,
-                "region": self.region,
-                "confidence": self.confidence,
-                "timeout": self.timeout,
-                "appear_grace": self.appear_grace,
-                "after_gone": self.after_gone,
-            })
+            data.update(
+                {
+                    "image": self.image,
+                    "region": self.region,
+                    "confidence": self.confidence,
+                    "timeout": self.timeout,
+                    "appear_grace": self.appear_grace,
+                    "after_gone": self.after_gone,
+                }
+            )
+        elif self.type == "window_set_bounds":
+            data.update(
+                {
+                    "window_title": self.window_title,
+                    "window_x": self.window_x,
+                    "window_y": self.window_y,
+                    "window_width": self.window_width,
+                    "window_height": self.window_height,
+                    "window_maximize": self.window_maximize,
+                }
+            )
         elif self.type == "group":
-            data.update({
-                "name": self.name,
-                "collapsed": self.collapsed,
-                "items": [it.to_dict() for it in self.items],
-            })
+            data.update(
+                {
+                    "name": self.name,
+                    "collapsed": self.collapsed,
+                    "items": [it.to_dict() for it in self.items],
+                }
+            )
 
         return data
 
@@ -259,11 +288,26 @@ class ActionItem:
         act.repeat = int(data.get("repeat", 1))
         act.seconds = float(data.get("seconds", 1.0))
 
+        act.window_title = str(data.get("window_title", ""))
+        act.window_x = int(data.get("window_x", 0))
+        act.window_y = int(data.get("window_y", 0))
+        act.window_width = int(data.get("window_width", 1280))
+        act.window_height = int(data.get("window_height", 800))
+        act.window_maximize = bool(data.get("window_maximize", False))
+
         act.name = str(data.get("name", ""))
         act.collapsed = bool(data.get("collapsed", False))
         act.items = [ActionItem.from_dict(item_data) for item_data in (data.get("items") or [])]
 
         return act
+
+
+@dataclass(frozen=True)
+class ActionLocation:
+    section: str
+    parent: ActionItem | None
+    items: list[ActionItem]
+    index: int
 
 
 @dataclass
@@ -281,6 +325,26 @@ class Macro:
     setup: list[ActionItem] = field(default_factory=list)
     per_row: list[ActionItem] = field(default_factory=list)
     cleanup: list[ActionItem] = field(default_factory=list)
+
+    def find_action_location(self, action: ActionItem) -> ActionLocation | None:
+        """Find the owning list at any group depth, matching by object identity."""
+        def find(
+            section: str, items: list[ActionItem], parent: ActionItem | None = None
+        ) -> ActionLocation | None:
+            for index, item in enumerate(items):
+                if item is action:
+                    return ActionLocation(section, parent, items, index)
+                if item.type == "group":
+                    location = find(section, item.items, item)
+                    if location is not None:
+                        return location
+            return None
+
+        for section in ("setup", "per_row", "cleanup"):
+            location = find(section, getattr(self, section))
+            if location is not None:
+                return location
+        return None
 
     def to_dict(self) -> dict[str, Any]:
         return {

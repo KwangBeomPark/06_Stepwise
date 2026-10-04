@@ -22,7 +22,11 @@ def run_all() -> str:
     print("Executing Stepwise M0 Environment Spikes...\n")
 
     # 1. Environment & Python
-    py_ver = f"{sys.version_split()[0]} ({platform.architecture()[0]})" if hasattr(sys, "version_split") else sys.version.split()[0]
+    py_ver = (
+        f"{sys.version_split()[0]} ({platform.architecture()[0]})"
+        if hasattr(sys, "version_split")
+        else sys.version.split()[0]
+    )
     os_info = f"{platform.system()} {platform.release()} (Build {platform.version()})"
 
     # 2. DPI & Resolution

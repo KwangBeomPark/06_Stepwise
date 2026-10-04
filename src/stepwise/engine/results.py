@@ -10,6 +10,7 @@ Specifications:
 
 from __future__ import annotations
 
+import copy
 import csv
 import hashlib
 import json
@@ -88,14 +89,49 @@ class ResultsManager:
         self.results_dir = results_dir
         os.makedirs(self.results_dir, exist_ok=True)
 
-        data_stem = os.path.splitext(os.path.basename(data_filepath))[0] if data_filepath else "standalone"
+        data_stem = (
+            os.path.splitext(os.path.basename(data_filepath))[0] if data_filepath else "standalone"
+        )
         clean_macro = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in macro_name)
         self.csv_path = os.path.join(self.results_dir, f"{clean_macro}__{data_stem}__results.csv")
+        self.pending_csv_path = os.path.splitext(self.csv_path)[0] + ".pending.csv"
+        self.pending_records: list[RowResultRecord] = []
+        self.persistence_errors: list[str] = []
+        self._journaled_count = 0
+        # Once a journal is in use, keep appending there to preserve record order
+        # across unlocks and subsequent runs. Readers merge both files.
+        self._use_pending = os.path.exists(self.pending_csv_path)
 
     def append_record(self, record: RowResultRecord) -> None:
         """Append record to results CSV and immediately flush to disk."""
-        file_exists = os.path.exists(self.csv_path) and os.path.getsize(self.csv_path) > 0
-        with open(self.csv_path, "a", encoding="utf-8-sig", newline="") as f:
+        if self._use_pending:
+            self.defer_record(record)
+            return
+        try:
+            self._write_record(self.csv_path, record)
+        except OSError:
+            self.defer_record(record)
+
+    def defer_record(self, record: RowResultRecord) -> None:
+        """Retain a private copy in memory and attempt the fallback journal."""
+        self._use_pending = True
+        buffered = copy.deepcopy(record)
+        self.pending_records.append(buffered)
+        try:
+            while self._journaled_count < len(self.pending_records):
+                self._write_record(
+                    self.pending_csv_path, self.pending_records[self._journaled_count]
+                )
+                self._journaled_count += 1
+            self.persistence_errors.clear()
+        except OSError as e:
+            self.persistence_errors.append(str(e))
+            print(f"Warning: Results are buffered in memory; pending journal write failed: {e}")
+
+    @staticmethod
+    def _write_record(path: str, record: RowResultRecord) -> None:
+        file_exists = os.path.exists(path) and os.path.getsize(path) > 0
+        with open(path, "a", encoding="utf-8-sig", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=RESULTS_COLUMNS)
             if not file_exists:
                 writer.writeheader()
@@ -105,11 +141,23 @@ class ResultsManager:
 
     def load_latest_row_statuses(self) -> dict[int, RowResultRecord]:
         """Load the latest status of each row from the CSV."""
-        if not os.path.exists(self.csv_path):
-            return {}
-
         statuses: dict[int, RowResultRecord] = {}
-        with open(self.csv_path, encoding="utf-8-sig", errors="replace") as f:
+        for path in (self.csv_path, self.pending_csv_path):
+            if os.path.exists(path):
+                try:
+                    self._load_statuses(path, statuses)
+                except PermissionError as e:
+                    print(f"Warning: Results file is locked; reading other available results: {e}")
+        for record in self.pending_records:
+            rec = copy.deepcopy(record)
+            if rec.status == "Running":
+                rec.status = "Interrupted"
+            statuses[rec.row_number] = rec
+        return statuses
+
+    @staticmethod
+    def _load_statuses(path: str, statuses: dict[int, RowResultRecord]) -> None:
+        with open(path, encoding="utf-8-sig", errors="replace") as f:
             reader = csv.DictReader(f)
             for r in reader:
                 try:
@@ -138,8 +186,6 @@ class ResultsManager:
                     statuses[row_num] = rec
                 except (ValueError, KeyError):
                     continue
-
-        return statuses
 
     def get_resume_suggestion(
         self,

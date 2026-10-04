@@ -6,7 +6,6 @@ Tests registration and deregistration of global hotkeys (e.g. F12 = 0x7B) withou
 from __future__ import annotations
 
 import ctypes
-from ctypes import wintypes
 
 user32 = ctypes.windll.user32
 VK_F12 = 0x7B
@@ -32,7 +31,9 @@ def test_hotkey_registration(vk_code: int = VK_F12, hotkey_id: int = 1) -> dict[
         "registered": bool(res_reg),
         "unregistered": unreg_ok,
         "win32_last_error": last_err if not res_reg else 0,
-        "note": "Registered and safely unregistered." if res_reg else "Could not register; key might be held by system/client",
+        "note": "Registered and safely unregistered."
+        if res_reg
+        else "Could not register; key might be held by system/client",
     }
 
 

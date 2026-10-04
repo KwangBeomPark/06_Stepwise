@@ -129,5 +129,7 @@ def calculate_action_delay(
     speed: SpeedMode = SpeedMode.NORMAL,
 ) -> float:
     """Calculate the total wait before an action."""
-    base = default_wait_before if action_wait_before is None else max(0.0, float(action_wait_before))
+    base = (
+        default_wait_before if action_wait_before is None else max(0.0, float(action_wait_before))
+    )
     return base + speed.extra_seconds

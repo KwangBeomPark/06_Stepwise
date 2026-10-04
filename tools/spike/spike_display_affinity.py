@@ -66,8 +66,14 @@ def check_display_affinity_support() -> dict[str, object]:
         wnd_class,
         "StepwiseAffinityTest",
         0x80000000,  # WS_POPUP
-        0, 0, 100, 100,
-        None, None, h_instance, None,
+        0,
+        0,
+        100,
+        100,
+        None,
+        None,
+        h_instance,
+        None,
     )
 
     affinity_applied = False
@@ -85,7 +91,9 @@ def check_display_affinity_support() -> dict[str, object]:
         "has_api": True,
         "affinity_applied": affinity_applied,
         "win32_last_error": last_err,
-        "recommended_approach": "WDA_EXCLUDEFROMCAPTURE" if affinity_applied else "Hide-before-capture fallback",
+        "recommended_approach": "WDA_EXCLUDEFROMCAPTURE"
+        if affinity_applied
+        else "Hide-before-capture fallback",
     }
 
 

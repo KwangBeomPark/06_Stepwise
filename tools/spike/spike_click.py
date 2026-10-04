@@ -10,6 +10,8 @@ import time
 from ctypes import wintypes
 
 # Win32 Constants
+SM_CXSCREEN = 0
+SM_CYSCREEN = 1
 INPUT_MOUSE = 0
 MOUSEEVENTF_MOVE = 0x0001
 MOUSEEVENTF_LEFTDOWN = 0x0002
@@ -47,7 +49,9 @@ def get_cursor_pos() -> tuple[int, int]:
     return pt.x, pt.y
 
 
-def test_mouse_position_and_click(target_x: int = 200, target_y: int = 200, simulate_click: bool = False) -> dict[str, object]:
+def test_mouse_position_and_click(
+    target_x: int = 200, target_y: int = 200, simulate_click: bool = False
+) -> dict[str, object]:
     user32 = ctypes.windll.user32
     # Ensure DPI awareness
     try:
@@ -58,8 +62,6 @@ def test_mouse_position_and_click(target_x: int = 200, target_y: int = 200, simu
     original_x, original_y = get_cursor_pos()
 
     # Screen dimensions for absolute coordinate normalization
-    SM_CXSCREEN = 0
-    SM_CYSCREEN = 1
     screen_w = user32.GetSystemMetrics(SM_CXSCREEN)
     screen_h = user32.GetSystemMetrics(SM_CYSCREEN)
 

@@ -10,7 +10,8 @@ Features:
 from __future__ import annotations
 
 import sys
-from PySide6.QtCore import QTimer, Qt
+
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,

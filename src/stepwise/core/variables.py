@@ -33,6 +33,7 @@ def substitute_variables(
     - {Column} is replaced with str(row_data['Column'])
     - If strict is True and a column is missing, KeyError is raised.
     """
+
     def _replacer(match: re.Match[str]) -> str:
         escaped_literal, var_name = match.groups()
         if escaped_literal is not None:

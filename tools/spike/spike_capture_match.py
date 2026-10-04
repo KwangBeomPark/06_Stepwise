@@ -7,6 +7,7 @@ Gracefully handles isolated virtual desktops / locked sessions where BitBlt acce
 from __future__ import annotations
 
 import time
+
 import cv2
 import mss
 import numpy as np
@@ -62,7 +63,9 @@ def test_capture_and_matching() -> dict[str, object]:
     return {
         "status": "OK" if is_accurate else "FAIL",
         "live_screen_capture": capture_success,
-        "capture_note": "Live desktop buffer captured" if capture_success else f"Isolated session ({error_msg}) - fallback test frame verified",
+        "capture_note": "Live desktop buffer captured"
+        if capture_success
+        else f"Isolated session ({error_msg}) - fallback test frame verified",
         "capture_latency_ms": round(cap_ms, 2),
         "matching_latency_ms": round(match_ms, 2),
         "total_latency_ms": round(total_ms, 2),

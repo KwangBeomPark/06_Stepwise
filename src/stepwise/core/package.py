@@ -83,7 +83,9 @@ def save_package(
             if image_files:
                 for img_name, img_data in image_files.items():
                     # Normalize zip entry path under images/
-                    entry_name = img_name if img_name.startswith("images/") else f"images/{img_name}"
+                    entry_name = (
+                        img_name if img_name.startswith("images/") else f"images/{img_name}"
+                    )
                     if isinstance(img_data, bytes):
                         zf.writestr(entry_name, img_data)
                     elif isinstance(img_data, str) and os.path.exists(img_data):

@@ -107,7 +107,12 @@ def read_data_file(
     if ext == ".xlsx":
         return _read_xlsx(filepath, sheet=sheet, header_row=header_row)
     else:
-        return _read_csv(filepath, header_row=header_row, override_encoding=encoding, override_delimiter=delimiter)
+        return _read_csv(
+            filepath,
+            header_row=header_row,
+            override_encoding=encoding,
+            override_delimiter=delimiter,
+        )
 
 
 def _read_xlsx(
@@ -135,7 +140,7 @@ def _read_xlsx(
 
             if curr_row_idx == header_row:
                 # Header row
-                headers = [h or f"Column_{i+1}" for i, h in enumerate(row_vals)]
+                headers = [h or f"Column_{i + 1}" for i, h in enumerate(row_vals)]
                 continue
 
             # Check if entire row is blank
@@ -179,7 +184,7 @@ def _read_csv(
             row_vals = [normalize_cell_value(cell) for cell in raw_row]
 
             if curr_row_idx == header_row:
-                headers = [h or f"Column_{i+1}" for i, h in enumerate(row_vals)]
+                headers = [h or f"Column_{i + 1}" for i, h in enumerate(row_vals)]
                 continue
 
             if not any(row_vals):

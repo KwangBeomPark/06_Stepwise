@@ -35,6 +35,8 @@ kernel32.GlobalLock.argtypes = [wintypes.HGLOBAL]
 kernel32.GlobalLock.restype = ctypes.c_void_p
 kernel32.GlobalUnlock.argtypes = [wintypes.HGLOBAL]
 kernel32.GlobalUnlock.restype = wintypes.BOOL
+kernel32.GlobalFree.argtypes = [wintypes.HGLOBAL]
+kernel32.GlobalFree.restype = wintypes.HGLOBAL
 
 
 def get_clipboard_text(retries: int = 5, retry_delay: float = 0.03) -> str | None:
@@ -63,31 +65,38 @@ def set_clipboard_text(text: str, retries: int = 5, retry_delay: float = 0.03) -
     raw_bytes = text.encode("utf-16le") + b"\x00\x00"
     for _ in range(retries):
         if user32.OpenClipboard(None):
+            h_mem = None
             try:
-                user32.EmptyClipboard()
                 h_mem = kernel32.GlobalAlloc(GMEM_MOVEABLE, len(raw_bytes))
                 if not h_mem:
                     return False
                 ptr = kernel32.GlobalLock(h_mem)
                 if not ptr:
                     return False
-                ctypes.memmove(ptr, raw_bytes, len(raw_bytes))
-                kernel32.GlobalUnlock(h_mem)
+                try:
+                    ctypes.memmove(ptr, raw_bytes, len(raw_bytes))
+                finally:
+                    kernel32.GlobalUnlock(h_mem)
+                if not user32.EmptyClipboard():
+                    return False
                 res = user32.SetClipboardData(CF_UNICODETEXT, h_mem)
+                if res:
+                    h_mem = None  # Ownership transferred to Windows.
                 return bool(res)
             finally:
+                if h_mem:
+                    kernel32.GlobalFree(h_mem)
                 user32.CloseClipboard()
         time.sleep(retry_delay)
     return False
 
 
 @contextmanager
-def temporary_clipboard_text(text: str, restore: bool = True) -> Generator[None, None, None]:
+def temporary_clipboard_text(text: str, restore: bool = True) -> Generator[bool, None, None]:
     """Context manager that puts text on clipboard and restores the previous content on exit."""
     original_text = get_clipboard_text() if restore else None
-    set_clipboard_text(text)
     try:
-        yield
+        yield set_clipboard_text(text)
     finally:
         if restore and original_text is not None:
             # Short stabilization before restoring so paste has time to complete

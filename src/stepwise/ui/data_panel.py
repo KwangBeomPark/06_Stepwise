@@ -31,7 +31,7 @@ from stepwise.ui.strings import Strings
 
 
 class DataPanel(QWidget):
-    data_loaded = Signal(str, list, list)  # (file_path, headers, rows)
+    data_loaded = Signal(str, list, list, list)  # (file_path, headers, rows, row_numbers)
     insert_variable_requested = Signal(str)  # "{ColumnName}"
     row_status_override = Signal(int, str)  # (row_number, new_status)
     run_only_row_requested = Signal(int)
@@ -51,6 +51,7 @@ class DataPanel(QWidget):
         # Header controls
         top_layout = QHBoxLayout()
         self.btn_select_file = QPushButton(Strings.SELECT_DATA_FILE)
+        self.btn_select_file.setToolTip(Strings.Tooltips.CHOOSE_DATA_FILE)
         self.btn_select_file.clicked.connect(self._on_choose_file)
         self.lbl_info = QLabel(Strings.NO_DATA)
         self.lbl_info.setStyleSheet("color: #64748b; font-weight: 500;")
@@ -81,7 +82,10 @@ class DataPanel(QWidget):
 
     def _on_choose_file(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
-            self, "Select Data File", "", "Data Files (*.xlsx *.csv);;Excel Files (*.xlsx);;CSV Files (*.csv)"
+            self,
+            "Select Data File",
+            "",
+            "Data Files (*.xlsx *.csv);;Excel Files (*.xlsx);;CSV Files (*.csv)",
         )
         if path:
             self.load_file(path)
@@ -99,7 +103,7 @@ class DataPanel(QWidget):
             self._rebuild_table()
             self._rebuild_chips()
             self.lbl_info.setText(f"{os.path.basename(filepath)} ({len(rows)} rows)")
-            self.data_loaded.emit(filepath, headers, rows)
+            self.data_loaded.emit(filepath, headers, rows, self._row_numbers)
         except Exception as e:
             self.lbl_info.setText(f"Error loading file: {e}")
 
@@ -117,7 +121,13 @@ class DataPanel(QWidget):
                 "background-color: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; "
                 "border-radius: 4px; padding: 2px 8px; font-weight: 500;"
             )
-            btn.setToolTip(f"Click to insert {{{header}}} into the current text field")
+            btn.setToolTip(
+                Strings.Tooltips.card(
+                    f"Insert {{{header}}}",
+                    f"Click to insert {{{header}}} variable into the active text field.",
+                    tip="Stepwise substitutes this with each row's actual cell data.",
+                )
+            )
             btn.clicked.connect(lambda _, h=header: self.insert_variable_requested.emit(f"{{{h}}}"))
             self.chips_layout.addWidget(btn)
 

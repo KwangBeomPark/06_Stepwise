@@ -8,13 +8,15 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QPainter, QPaintEvent, QPen
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QApplication, QWidget
 
 
 class ScreenCrosshairOverlay(QWidget):
     """Flashes a target crosshair over target screen coordinates."""
 
-    def __init__(self, x: int, y: int, duration_ms: int = 1500, parent: QWidget | None = None) -> None:
+    def __init__(
+        self, x: int, y: int, duration_ms: int = 1500, parent: QWidget | None = None
+    ) -> None:
         super().__init__(parent)
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
@@ -29,10 +31,19 @@ class ScreenCrosshairOverlay(QWidget):
         self._target_y = y
         self._box_radius = 50
 
+        # Adjust physical coordinates to Qt logical coordinates
+        screen = QApplication.primaryScreen()
+        dpr = float(screen.devicePixelRatio()) if screen else 1.0
+        if dpr <= 0:
+            dpr = 1.0
+        screen_origin = screen.geometry().topLeft() if screen else None
+        log_x = int(round(x / dpr)) + (screen_origin.x() if screen_origin else 0)
+        log_y = int(round(y / dpr)) + (screen_origin.y() if screen_origin else 0)
+
         # Position overlay centered on target coordinate
         self.setGeometry(
-            x - self._box_radius,
-            y - self._box_radius,
+            log_x - self._box_radius,
+            log_y - self._box_radius,
             self._box_radius * 2,
             self._box_radius * 2 + 25,
         )

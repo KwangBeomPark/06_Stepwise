@@ -5,6 +5,7 @@ from __future__ import annotations
 
 class StepwiseError(Exception):
     """Base exception for all Stepwise runtime errors."""
+
     def __init__(self, message: str, details: str | None = None) -> None:
         super().__init__(message)
         self.message = message
@@ -18,6 +19,7 @@ class StepwiseError(Exception):
 
 class StepFailure(StepwiseError):
     """Raised when an action step fails (e.g. timeout, Guard/Verify failure)."""
+
     def __init__(
         self,
         message: str,
@@ -42,7 +44,9 @@ class StepFailure(StepwiseError):
         elif self.step_id:
             parts.append(f"step {self.step_id}")
         prefix = ", ".join(parts)
-        match_str = f" (best match {int(self.best_match * 100)}%)" if self.best_match is not None else ""
+        match_str = (
+            f" (best match {int(self.best_match * 100)}%)" if self.best_match is not None else ""
+        )
         if prefix:
             return f"{prefix} — {self.message}{match_str}"
         return f"{self.message}{match_str}"
@@ -50,14 +54,20 @@ class StepFailure(StepwiseError):
 
 class AbortRequested(StepwiseError):
     """Raised when execution is aborted by user (F12 or Stop button)."""
-    def __init__(self, message: str = "Execution aborted by user.", row_number: int | None = None) -> None:
+
+    def __init__(
+        self, message: str = "Execution aborted by user.", row_number: int | None = None
+    ) -> None:
         super().__init__(message)
         self.row_number = row_number
 
 
 class ScreenUnavailableError(StepwiseError):
     """Raised when display is locked, minimized, disconnected, or black."""
-    def __init__(self, message: str = "Screen unavailable (session locked or disconnected?).") -> None:
+
+    def __init__(
+        self, message: str = "Screen unavailable (session locked or disconnected?)."
+    ) -> None:
         super().__init__(message)
 
 
