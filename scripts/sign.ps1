@@ -127,8 +127,10 @@ if ($versionMatch.Success) {
     $tag = "v$ver"
     Write-Host "[6/6] Publishing signed installer to GitHub Release $tag..." -ForegroundColor Yellow
 
-    $null = & gh release view $tag 2>&1
-    if ($LASTEXITCODE -ne 0) {
+    $releaseList = & gh release list --limit 50 2>$null
+    $releaseExists = ($releaseList -match "\b$([regex]::Escape($tag))\b")
+
+    if (-not $releaseExists) {
         Write-Host "Release $tag does not exist. Creating new release..." -ForegroundColor Cyan
         & gh release create $tag $installerExe --title "v$ver - Stepwise Release" --generate-notes
         if ($LASTEXITCODE -eq 0) {
