@@ -2,7 +2,7 @@
 ; Installs into user local appdata without administrator privileges.
 
 #define MyAppName "Stepwise"
-#define MyAppVersion "0.2.0"
+#define MyAppVersion "0.2.1"
 #define MyAppPublisher "Stepwise Team"
 #define MyAppExeName "Stepwise.exe"
 
@@ -16,7 +16,7 @@ DefaultGroupName=Stepwise
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 OutputDir=..\release\dist
-OutputBaseFilename=Stepwise-Setup-{#MyAppVersion}
+OutputBaseFilename=App06_Stepwise-Setup_v{#MyAppVersion}
 SetupIconFile=..\assets\icons\stepwise.ico
 Compression=lzma2/max
 SolidCompression=yes

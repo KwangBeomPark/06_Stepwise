@@ -85,7 +85,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # 6. Sign installer executable
-$setupFiles = Get-ChildItem "$projectRoot\release\dist\Stepwise-Setup-*.exe" | Sort-Object LastWriteTime -Descending
+$setupFiles = Get-ChildItem "$projectRoot\release\dist\*Stepwise-Setup*.exe" | Sort-Object LastWriteTime -Descending
 if (-not $setupFiles) {
     Write-Error "Installer executable not found in release\dist"
     exit 1
@@ -115,17 +115,38 @@ foreach ($bin in @($appExe, $installerExe)) {
     Write-Host "Verified $($sig.Status): $(Split-Path -Leaf $bin) (Timestamped: $($sig.TimeStamperCertificate.Subject))" -ForegroundColor Green
 }
 
-# 8. Upload / Replace on GitHub Release
-$versionMatch = [regex]::Match($installerExe, "Stepwise-Setup-(.+)\.exe")
+# 8. Upload / Create on GitHub Release
+$fileName = Split-Path -Leaf $installerExe
+$versionMatch = [regex]::Match($fileName, "(?:.*Stepwise-Setup[_-]v?)([0-9\.]+)\.exe")
+if (-not $versionMatch.Success) {
+    $versionMatch = [regex]::Match($fileName, "([0-9]+\.[0-9]+\.[0-9]+)")
+}
+
 if ($versionMatch.Success) {
-    $tag = "v" + $versionMatch.Groups[1].Value
-    Write-Host "[6/6] Uploading signed installer to GitHub Release $tag..." -ForegroundColor Yellow
-    gh release upload $tag $installerExe --clobber
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host "Successfully uploaded signed installer to GitHub Release $tag!" -ForegroundColor Green
+    $ver = $versionMatch.Groups[1].Value
+    $tag = "v$ver"
+    Write-Host "[6/6] Publishing signed installer to GitHub Release $tag..." -ForegroundColor Yellow
+
+    $null = & gh release view $tag 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Release $tag does not exist. Creating new release..." -ForegroundColor Cyan
+        & gh release create $tag $installerExe --title "v$ver - Stepwise Release" --generate-notes
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "Successfully created GitHub Release $tag and uploaded installer!" -ForegroundColor Green
+        } else {
+            Write-Warning "Failed to create GitHub Release $tag. Check gh auth status or permissions."
+        }
     } else {
-        Write-Warning "Failed to upload to GitHub Release. Check gh auth status."
+        Write-Host "Release $tag exists. Uploading/updating asset..." -ForegroundColor Cyan
+        & gh release upload $tag $installerExe --clobber
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "Successfully uploaded signed installer to GitHub Release $tag!" -ForegroundColor Green
+        } else {
+            Write-Warning "Failed to upload to GitHub Release. Check gh auth status."
+        }
     }
+} else {
+    Write-Warning "Could not extract version from installer file name: $fileName"
 }
 
 Write-Host "=========================================" -ForegroundColor Green
