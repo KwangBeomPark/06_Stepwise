@@ -26,11 +26,12 @@ screenshots/
 # Tools & Local development scratch
 tools/
 
-# Build & packaging artifacts (dist/ and release/dist/ are working directories)
+# Build & packaging artifacts
 build/
 dist/
-release/build/
-release/dist/
+release/
+*.exe
+*.zip
 *.spec.bak
 
 # IDE & Editor files
