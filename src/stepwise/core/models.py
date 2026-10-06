@@ -328,6 +328,7 @@ class Macro:
 
     def find_action_location(self, action: ActionItem) -> ActionLocation | None:
         """Find the owning list at any group depth, matching by object identity."""
+
         def find(
             section: str, items: list[ActionItem], parent: ActionItem | None = None
         ) -> ActionLocation | None:

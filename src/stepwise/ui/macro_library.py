@@ -74,6 +74,12 @@ class MacroLibraryPanel(QWidget):
 
         self.refresh_list()
 
+    def set_library_dir(self, new_dir: str) -> None:
+        """Update the library directory and refresh."""
+        self.library_dir = new_dir
+        os.makedirs(self.library_dir, exist_ok=True)
+        self.refresh_list()
+
     def refresh_list(self) -> None:
         """Scan library folder and populate list."""
         self.list_widget.clear()

@@ -433,6 +433,7 @@ class ActionTreeWidget(QWidget):
             if isinstance(target_restore_key, str) and (
                 target_restore_key.startswith("header_") or target_restore_key.startswith("empty_")
             ):
+
                 def find_marker(node: QTreeWidgetItem) -> QTreeWidgetItem | None:
                     if node.data(0, Qt.ItemDataRole.UserRole) == target_restore_key:
                         return node
@@ -510,11 +511,7 @@ class ActionTreeWidget(QWidget):
                 ]
             )
             node.setData(0, Qt.UserRole, act)
-            node.setFlags(
-                Qt.ItemIsEnabled
-                | Qt.ItemIsSelectable
-                | Qt.ItemIsUserCheckable
-            )
+            node.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsUserCheckable)
             node.setCheckState(1, Qt.Checked if act.enabled else Qt.Unchecked)
             for col in range(7):
                 node.setForeground(col, QBrush(text_color))

@@ -36,6 +36,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from stepwise.core.app_paths import (
+    default_library_directory,
+    load_user_settings,
+    save_user_settings,
+)
 from stepwise.core.models import ActionItem, Macro
 from stepwise.core.package import load_package, save_package
 from stepwise.engine.errors import StepFailure
@@ -76,16 +81,24 @@ class ExecutionSnapshot:
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, library_dir: str = "macros", parent: QWidget | None = None) -> None:
+    def __init__(self, library_dir: str | None = None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle(Strings.APP_TITLE)
         self.resize(1200, 800)
+
+        # Persistent user settings
+        self._user_settings = load_user_settings()
+        if library_dir:
+            self._library_dir = library_dir
+        else:
+            self._library_dir = self._user_settings.get("library_dir") or str(
+                default_library_directory()
+            )
 
         self._current_macro: Macro = Macro()
         self._current_macro_path: str | None = None
         self._package_temp = tempfile.TemporaryDirectory(prefix="stepwise_pkg_")
         self._package_dir = self._package_temp.name
-        self._library_dir = library_dir
         self._data_filepath: str | None = None
         self._data_headers: list[str] = []
         self._data_rows: list[dict[str, str]] = []
@@ -115,6 +128,19 @@ class MainWindow(QMainWindow):
         self._setup_ui()
         self._setup_shortcuts()
         self._update_status_bar_screen_info()
+
+        # Restore saved window geometry if present
+        if self._user_settings.get("window_geometry"):
+            try:
+                self.restoreGeometry(bytes.fromhex(self._user_settings["window_geometry"]))
+                # Guard against disconnected monitors (off-screen prevention)
+                screen = self.screen()
+                if screen:
+                    avail = screen.availableGeometry()
+                    if not avail.intersects(self.geometry()):
+                        self.setGeometry(avail.adjusted(50, 50, -50, -50))
+            except Exception:
+                pass
 
         # Set window icon
         icon_path = os.path.join(os.path.dirname(__file__), "stepwise.ico")
@@ -162,18 +188,18 @@ class MainWindow(QMainWindow):
         self.toolbar.addWidget(self.btn_settings)
 
         # Splitters
-        main_splitter = QSplitter(Qt.Horizontal)
-        main_splitter.setChildrenCollapsible(False)
-        self.setCentralWidget(main_splitter)
+        self.main_splitter = QSplitter(Qt.Horizontal)
+        self.main_splitter.setChildrenCollapsible(False)
+        self.setCentralWidget(self.main_splitter)
 
         self.lib_panel = MacroLibraryPanel(self._library_dir)
         self.lib_panel.setMinimumWidth(180)
         self.lib_panel.macro_selected.connect(self.load_macro_file)
-        main_splitter.addWidget(self.lib_panel)
+        self.main_splitter.addWidget(self.lib_panel)
 
-        center_splitter = QSplitter(Qt.Vertical)
-        center_splitter.setChildrenCollapsible(False)
-        main_splitter.addWidget(center_splitter)
+        self.center_splitter = QSplitter(Qt.Vertical)
+        self.center_splitter.setChildrenCollapsible(False)
+        self.main_splitter.addWidget(self.center_splitter)
 
         tree_container = QWidget()
         tree_container.setMinimumHeight(200)
@@ -243,7 +269,7 @@ class MainWindow(QMainWindow):
         action_btn_layout.addStretch()
         tree_layout.addLayout(action_btn_layout)
 
-        center_splitter.addWidget(tree_container)
+        self.center_splitter.addWidget(tree_container)
 
         # Center Bottom: Data Preview (Wide horizontal table)
         self.data_panel = DataPanel()
@@ -252,7 +278,7 @@ class MainWindow(QMainWindow):
         self.data_panel.insert_variable_requested.connect(self._insert_variable_into_current_action)
         self.data_panel.row_status_override.connect(self._on_row_status_override)
         self.data_panel.run_only_row_requested.connect(self._on_run_only_row)
-        center_splitter.addWidget(self.data_panel)
+        self.center_splitter.addWidget(self.data_panel)
 
         # Right Column: Properties Panel (Full-height vertical inspector)
         self.prop_panel = PropertiesPanel()
@@ -263,19 +289,35 @@ class MainWindow(QMainWindow):
         self.prop_panel.request_test_step.connect(self._test_single_action)
         self.prop_panel.request_test_match.connect(self._test_image_match)
         self.prop_panel.setMinimumWidth(320)
-        main_splitter.addWidget(self.prop_panel)
+        self.main_splitter.addWidget(self.prop_panel)
 
         # Layout Stretch Factors & Initial Sizes
         # main_splitter: [Left Library: 1] : [Center Tree & Data: 4] : [Right Properties: 2]
-        main_splitter.setStretchFactor(0, 1)
-        main_splitter.setStretchFactor(1, 4)
-        main_splitter.setStretchFactor(2, 2)
-        main_splitter.setSizes([200, 750, 320])
+        self.main_splitter.setStretchFactor(0, 1)
+        self.main_splitter.setStretchFactor(1, 4)
+        self.main_splitter.setStretchFactor(2, 2)
+        self.main_splitter.setSizes([200, 750, 320])
 
         # center_splitter: [Upper Action Tree: 3] : [Lower Data Preview: 2]
-        center_splitter.setStretchFactor(0, 3)
-        center_splitter.setStretchFactor(1, 2)
-        center_splitter.setSizes([450, 250])
+        self.center_splitter.setStretchFactor(0, 3)
+        self.center_splitter.setStretchFactor(1, 2)
+        self.center_splitter.setSizes([450, 250])
+
+        # Restore saved splitter states if present
+        if self._user_settings.get("main_splitter_state"):
+            try:
+                self.main_splitter.restoreState(
+                    bytes.fromhex(self._user_settings["main_splitter_state"])
+                )
+            except Exception:
+                pass
+        if self._user_settings.get("center_splitter_state"):
+            try:
+                self.center_splitter.restoreState(
+                    bytes.fromhex(self._user_settings["center_splitter_state"])
+                )
+            except Exception:
+                pass
 
         # Status Bar
         self.status_bar = QStatusBar()
@@ -663,6 +705,11 @@ class MainWindow(QMainWindow):
     def _open_settings(self) -> None:
         dlg = SettingsDialog(parent=self)
         if dlg.exec() == SettingsDialog.Accepted:
+            self._user_settings = load_user_settings()
+            new_lib = self._user_settings.get("library_dir")
+            if new_lib and new_lib != self._library_dir:
+                self._library_dir = str(new_lib)
+                self.lib_panel.set_library_dir(str(new_lib))
             self.status_bar.showMessage("Settings saved.")
 
     def _on_run_clicked(self) -> None:
@@ -938,6 +985,24 @@ class MainWindow(QMainWindow):
             self._stop_run()
             event.ignore()
             return
+
+        # Save window geometry & splitter states to UserSetting/settings.json
+        try:
+            self._user_settings["window_geometry"] = (
+                self.saveGeometry().toHex().data().decode("ascii")
+            )
+            if hasattr(self, "main_splitter"):
+                self._user_settings["main_splitter_state"] = (
+                    self.main_splitter.saveState().toHex().data().decode("ascii")
+                )
+            if hasattr(self, "center_splitter"):
+                self._user_settings["center_splitter_state"] = (
+                    self.center_splitter.saveState().toHex().data().decode("ascii")
+                )
+            save_user_settings(self._user_settings)
+        except Exception as e:
+            print(f"Warning: Failed to persist window layout: {e}")
+
         if hasattr(self, "overlay"):
             self.overlay.close()
         self.floating_panel.close()

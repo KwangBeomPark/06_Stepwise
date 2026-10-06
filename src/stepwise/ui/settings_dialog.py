@@ -21,6 +21,15 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from stepwise import __version__
+from stepwise.core.app_paths import (
+    default_library_directory,
+    default_results_directory,
+    load_user_settings,
+    save_user_settings,
+    user_settings_directory,
+)
+
 
 class SettingsDialog(QDialog):
     def __init__(
@@ -28,9 +37,13 @@ class SettingsDialog(QDialog):
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Stepwise Settings")
-        self.resize(520, 420)
+        self.resize(520, 440)
 
-        self._settings = dict(settings_dict or {})
+        # Merge with persistent user settings
+        current_saved = load_user_settings()
+        if settings_dict:
+            current_saved.update(settings_dict)
+        self._settings = current_saved
 
         main_layout = QVBoxLayout(self)
         self.tabs = QTabWidget()
@@ -41,7 +54,8 @@ class SettingsDialog(QDialog):
         layout_gen = QFormLayout(tab_gen)
 
         h_lib = QHBoxLayout()
-        self.txt_lib_dir = QLineEdit(str(self._settings.get("library_dir", "macros")))
+        def_lib = self._settings.get("library_dir") or str(default_library_directory())
+        self.txt_lib_dir = QLineEdit(str(def_lib))
         btn_lib = QPushButton("Browse...")
         btn_lib.clicked.connect(lambda: self._browse_dir(self.txt_lib_dir))
         h_lib.addWidget(self.txt_lib_dir)
@@ -49,7 +63,8 @@ class SettingsDialog(QDialog):
         layout_gen.addRow("Library Folder:", h_lib)
 
         h_res = QHBoxLayout()
-        self.txt_res_dir = QLineEdit(str(self._settings.get("results_dir", "results")))
+        def_res = self._settings.get("results_dir") or str(default_results_directory())
+        self.txt_res_dir = QLineEdit(str(def_res))
         btn_res = QPushButton("Browse...")
         btn_res.clicked.connect(lambda: self._browse_dir(self.txt_res_dir))
         h_res.addWidget(self.txt_res_dir)
@@ -58,7 +73,7 @@ class SettingsDialog(QDialog):
 
         self.spin_countdown = QSpinBox()
         self.spin_countdown.setRange(0, 30)
-        self.spin_countdown.setValue(int(self._settings.get("countdown_seconds", 5)))
+        self.spin_countdown.setValue(int(self._settings.get("countdown_seconds", 3)))
         layout_gen.addRow("Countdown (seconds):", self.spin_countdown)
 
         self.tabs.addTab(tab_gen, "General")
@@ -105,14 +120,23 @@ class SettingsDialog(QDialog):
         layout_about = QVBoxLayout(tab_about)
         layout_about.setSpacing(10)
         lbl_about = QLabel(
-            "<b>Stepwise v0.1.0</b><br>Windows Data-Driven Macro Automation Tool.<br>Enterprise-ready, Non-admin execution."
+            f"<b>Stepwise v{__version__} (PL Suite App06)</b><br>"
+            "Windows Data-Driven Macro Automation Tool.<br>"
+            "Enterprise-ready, Per-User execution."
         )
         lbl_about.setTextFormat(Qt.RichText)
         layout_about.addWidget(lbl_about)
 
+        h_about_btns = QHBoxLayout()
+        btn_user_setting = QPushButton("Open UserSetting Folder")
+        btn_user_setting.clicked.connect(self._open_user_settings)
+        h_about_btns.addWidget(btn_user_setting)
+
         btn_logs = QPushButton("Open Logs Folder")
         btn_logs.clicked.connect(self._open_logs)
-        layout_about.addWidget(btn_logs)
+        h_about_btns.addWidget(btn_logs)
+        layout_about.addLayout(h_about_btns)
+
         layout_about.addStretch()
 
         self.tabs.addTab(tab_about, "About")
@@ -133,8 +157,15 @@ class SettingsDialog(QDialog):
         if d:
             line_edit.setText(d)
 
+    def _open_user_settings(self) -> None:
+        u_dir = str(user_settings_directory())
+        try:
+            os.startfile(u_dir)
+        except Exception:
+            pass
+
     def _open_logs(self) -> None:
-        log_dir = "logs"
+        log_dir = str(user_settings_directory() / "logs")
         os.makedirs(log_dir, exist_ok=True)
         try:
             os.startfile(log_dir)
@@ -147,6 +178,10 @@ class SettingsDialog(QDialog):
         self._settings["countdown_seconds"] = self.spin_countdown.value()
         self._settings["default_wait_before"] = self.spin_wait_before.value()
         self._settings["poll_interval"] = self.spin_poll.value()
+        try:
+            save_user_settings(self._settings)
+        except Exception as e:
+            print(f"Warning: Failed to save user settings: {e}")
         self.accept()
 
     def get_settings(self) -> dict[str, object]:

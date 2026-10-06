@@ -14,7 +14,8 @@ __pycache__/
 *.egg-info/
 *.egg
 
-# Stepwise runtime & local data
+# PL Suite UserSetting & Local runtime data
+UserSetting/
 recovery/
 logs/
 results/
@@ -22,7 +23,10 @@ results/
 results.csv
 screenshots/
 
-# Build & packaging artifacts
+# Tools & Local development scratch
+tools/
+
+# Build & packaging artifacts (dist/ and release/dist/ are working directories)
 build/
 dist/
 release/build/

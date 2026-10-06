@@ -1,4 +1,4 @@
-; Inno Setup script for Stepwise (PL Suite App06)
+; Script for Stepwise (PL Suite App06)
 ; Standard Per-User installer for PL Suite applications (App01 ~ App10).
 
 #ifndef MyAppVersion

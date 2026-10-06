@@ -55,8 +55,12 @@ class Strings:
     INSERT_TARGET_AFTER = "Add target: [{section}] after Step #{step}"
     INSERT_TARGET_GROUP = 'Add target: [{section}] after group "{group}"'
     INSERT_TARGET_END = "Add target: [{section}] at end"
-    MOVE_BOUNDARY_TOP = "Already at top of section or group. Use 'Move to Section' to change section."
-    MOVE_BOUNDARY_BOTTOM = "Already at bottom of section or group. Use 'Move to Section' to change section."
+    MOVE_BOUNDARY_TOP = (
+        "Already at top of section or group. Use 'Move to Section' to change section."
+    )
+    MOVE_BOUNDARY_BOTTOM = (
+        "Already at bottom of section or group. Use 'Move to Section' to change section."
+    )
 
     # Action Types
     TYPE_CLICK = "Click"
