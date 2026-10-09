@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QSpinBox,
     QTabWidget,
@@ -29,6 +30,7 @@ from stepwise.core.app_paths import (
     save_user_settings,
     user_settings_directory,
 )
+from stepwise.ui.strings import Strings
 
 
 class SettingsDialog(QDialog):
@@ -128,14 +130,17 @@ class SettingsDialog(QDialog):
         layout_about.addWidget(lbl_about)
 
         h_about_btns = QHBoxLayout()
-        btn_user_setting = QPushButton("Open UserSetting Folder")
+        btn_user_setting = QPushButton(Strings.OPEN_SETTINGS_FOLDER)
         btn_user_setting.clicked.connect(self._open_user_settings)
         h_about_btns.addWidget(btn_user_setting)
 
-        btn_logs = QPushButton("Open Logs Folder")
-        btn_logs.clicked.connect(self._open_logs)
-        h_about_btns.addWidget(btn_logs)
+        btn_results = QPushButton(Strings.OPEN_RESULTS_FOLDER)
+        btn_results.clicked.connect(self._open_results)
+        h_about_btns.addWidget(btn_results)
         layout_about.addLayout(h_about_btns)
+        backup_hint = QLabel(Strings.BACKUP_SCOPE)
+        backup_hint.setWordWrap(True)
+        layout_about.addWidget(backup_hint)
 
         layout_about.addStretch()
 
@@ -161,27 +166,29 @@ class SettingsDialog(QDialog):
         u_dir = str(user_settings_directory())
         try:
             os.startfile(u_dir)
-        except Exception:
-            pass
+        except OSError:
+            QMessageBox.warning(self, Strings.SAVE_ERROR_TITLE, Strings.FOLDER_OPEN_FAILED)
 
-    def _open_logs(self) -> None:
-        log_dir = str(user_settings_directory() / "logs")
-        os.makedirs(log_dir, exist_ok=True)
+    def _open_results(self) -> None:
+        results = self.txt_res_dir.text().strip() or str(default_results_directory())
         try:
-            os.startfile(log_dir)
-        except Exception:
-            pass
+            os.startfile(results)
+        except OSError:
+            QMessageBox.warning(self, Strings.SAVE_ERROR_TITLE, Strings.FOLDER_OPEN_FAILED)
 
     def _on_save(self) -> None:
-        self._settings["library_dir"] = self.txt_lib_dir.text().strip()
-        self._settings["results_dir"] = self.txt_res_dir.text().strip()
-        self._settings["countdown_seconds"] = self.spin_countdown.value()
-        self._settings["default_wait_before"] = self.spin_wait_before.value()
-        self._settings["poll_interval"] = self.spin_poll.value()
+        candidate = dict(self._settings)
+        candidate["library_dir"] = self.txt_lib_dir.text().strip()
+        candidate["results_dir"] = self.txt_res_dir.text().strip()
+        candidate["countdown_seconds"] = self.spin_countdown.value()
+        candidate["default_wait_before"] = self.spin_wait_before.value()
+        candidate["poll_interval"] = self.spin_poll.value()
         try:
-            save_user_settings(self._settings)
-        except Exception as e:
-            print(f"Warning: Failed to save user settings: {e}")
+            save_user_settings(candidate)
+        except OSError:
+            QMessageBox.warning(self, Strings.SAVE_ERROR_TITLE, Strings.SETTINGS_SAVE_FAILED)
+            return
+        self._settings = candidate
         self.accept()
 
     def get_settings(self) -> dict[str, object]:

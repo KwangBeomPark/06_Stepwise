@@ -70,6 +70,7 @@ def test_run_guard_and_snapshot_isolation(qapp: QApplication, qtbot: object) -> 
     win._data_rows = [{"Name": "Alice"}]
     win._data_row_nums = [7]
     win._data_filepath = "original.xlsx"
+    win._user_settings["results_dir"] = "original results"
     package_dir = win._package_dir
     opts = {"skip_setup": True}
     calls = []
@@ -95,6 +96,7 @@ def test_run_guard_and_snapshot_isolation(qapp: QApplication, qtbot: object) -> 
         win._data_rows[0]["Name"] = "Bob"
         win._data_row_nums[0] = 99
         win._data_filepath = "edited.xlsx"
+        win._user_settings["results_dir"] = "edited results"
         opts["skip_setup"] = False
         win._on_runner_event("stale-token", "worker_finished", ())
         assert win._is_running
@@ -106,6 +108,7 @@ def test_run_guard_and_snapshot_isolation(qapp: QApplication, qtbot: object) -> 
     assert calls[0]["rows_data"] == ({"Name": "Alice"},)
     assert calls[0]["row_numbers"] == (7,)
     assert calls[0]["data_filepath"] == "original.xlsx"
+    assert calls[0]["results_dir"] == "original results"
     assert calls[0]["package_dir"] == package_dir
     assert calls[0]["controller"] is controller
     assert calls[0]["skip_setup"] is True

@@ -1,5 +1,7 @@
 # PL Suite 표준 릴리즈 및 프로젝트 구조 기준안 (Packaging & Directory Standards)
 
+> 01·02·04·05·06·07의 단계별 적용·보존·호환성 기준은 [6개 앱 공통 정비 기준](SUITE_STANDARDIZATION.md)을 우선합니다. 아래 구조·파일명은 목표 기준이며 모든 현재 배포물의 검증 완료를 뜻하지 않습니다.
+
 본 문서는 PL Suite (App01 ~ App10) 전 프로젝트의 일관된 배포 관리, 디렉터리 청결성 유지, 무결성 검증을 위한 표준 기준안입니다.
 
 ---
@@ -87,3 +89,7 @@ PL Suite는 기업 표준 관리 번호(App01~App10)와 일반 공개 명칭 간
 2. **빌드 스크립트(`scripts/build.ps1`, `scripts/sign.ps1`)**:
    - 컴파일 완료 후 반드시 코드 서명(Authenticode + RFC 3161 타임스탬프)을 수행합니다.
    - 서명된 아티팩트를 듀얼 네이밍으로 `release/`에 스테이징하고 체크섬과 매니페스트를 자동 갱신합니다.
+
+## 2026-10-09 현재 App06 계약
+
+새 공식 세트는 `App06_Stepwise_Setup_v<version>.exe`, `build-manifest.v<version>.json`, `SHA256SUMS.v<version>.txt`의 3개입니다. 위 과거 공통 표의 generic 메타데이터·두 이름/ZIP 설명은 현재 App06에 적용하지 않습니다. 이전 generic 장부·과거 게시물은 보존하고 검증 읽기 호환만 제공합니다. 실제 사용자 서명/설치/게시 게이트는 루트 `RELEASE_CHECKLIST.md`에 있습니다.

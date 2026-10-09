@@ -12,6 +12,7 @@ import json
 import os
 import sys
 
+from stepwise.core.app_paths import default_results_directory, load_user_settings
 from stepwise.engine.runner import ExecutionCallbacks, RunSummary, run_macro
 from stepwise.engine.timing import ExecutionController, SpeedMode
 from stepwise.services.hotkeys import GlobalHotkeyManager
@@ -40,6 +41,9 @@ def main() -> None:
     run_parser.add_argument("macro", help="Path to macro .json or .swm file")
     run_parser.add_argument("--data", help="Optional path to data CSV/XLSX file")
     run_parser.add_argument(
+        "--results-dir", help="Run results folder (default: saved setting or UserSetting/results)"
+    )
+    run_parser.add_argument(
         "--speed",
         default="Normal",
         choices=["Normal", "Slow", "Very slow"],
@@ -56,6 +60,10 @@ def main() -> None:
     if args.command != "run":
         parser.print_help()
         sys.exit(1)
+    saved_settings = load_user_settings()
+    results_dir = args.results_dir or str(
+        saved_settings.get("results_dir") or default_results_directory()
+    )
 
     macro_path = args.macro
     if not os.path.exists(macro_path):
@@ -117,6 +125,7 @@ def main() -> None:
             run_1_row=args.run_1_row,
             package_dir=os.path.dirname(os.path.abspath(macro_path)),
             countdown_seconds=args.countdown,
+            results_dir=results_dir,
         )
 
         print("\n" + "=" * 50)

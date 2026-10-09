@@ -2,13 +2,19 @@
 ; Standard Per-User installer for PL Suite applications (App01 ~ App10).
 
 #ifndef MyAppVersion
-#define MyAppVersion "0.3.0"
+#define MyAppVersion "0.3.1"
 #endif
 
 #define MyAppName "Stepwise"
 #define MyAppPublisher "KwangBeomPark"
 #define MyAppURL "https://github.com/KwangBeomPark/06_Stepwise"
 #define MyAppExeName "Stepwise.exe"
+#ifndef MyAppSourceDir
+#define MyAppSourceDir "..\dist\Stepwise"
+#endif
+#ifndef MyAppOutputDir
+#define MyAppOutputDir "..\build\installer-preview"
+#endif
 
 [Setup]
 AppId={{C782B3E1-628D-4C10-9E1D-3A20B71E86E2}}
@@ -24,8 +30,8 @@ DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
-OutputDir=..\release\dist
-OutputBaseFilename=App06_Stepwise-Setup_v{#MyAppVersion}
+OutputDir={#MyAppOutputDir}
+OutputBaseFilename=App06_Stepwise_Setup_v{#MyAppVersion}
 SetupIconFile=..\assets\icons\stepwise.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 Compression=lzma2/max
@@ -33,7 +39,11 @@ SolidCompression=yes
 WizardStyle=modern
 ChangesAssociations=yes
 CloseApplications=yes
+RestartApplications=no
+UsePreviousAppDir=yes
 CloseApplicationsFilter=Stepwise.exe
+VersionInfoVersion={#MyAppVersion}
+VersionInfoProductVersion={#MyAppVersion}
 
 [Languages]
 Name: "korean"; MessagesFile: "compiler:Languages\Korean.isl"
@@ -47,7 +57,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Name: "{app}\UserSetting"; Flags: uninsneveruninstall
 
 [Files]
-Source: "..\dist\Stepwise\*"; DestDir: "{app}"; Excludes: "UserSetting\*"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#MyAppSourceDir}\*"; DestDir: "{app}"; Excludes: "UserSetting\*,macros\*,results\*"; Flags: ignoreversion recursesubdirs createallsubdirs; BeforeInstall: CheckStepwiseFiles
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\{#MyAppExeName}"
@@ -63,3 +73,26 @@ Root: HKCU; Subkey: "Software\Classes\Stepwise.Macro\shell\open\command"; ValueT
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+
+[Code]
+var
+  StepwiseFilesChecked: Boolean;
+
+procedure CheckStepwiseFiles;
+var
+  AppPath: String;
+  AppFile: TFileStream;
+begin
+  if StepwiseFilesChecked then Exit;
+  { This runs before the first file copy, after Restart Manager's normal close request. }
+  AppPath := ExpandConstant('{app}\{#MyAppExeName}');
+  if FileExists(AppPath) then begin
+    try
+      AppFile := TFileStream.Create(AppPath, fmOpenReadWrite or fmShareExclusive);
+      AppFile.Free;
+    except
+      RaiseException('Stepwise is still running or unavailable. Stop the macro, close Stepwise, and retry installation.');
+    end;
+  end;
+  StepwiseFilesChecked := True;
+end;

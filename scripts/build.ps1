@@ -1,95 +1,49 @@
-# Stepwise Build & Packaging Automation Script (PL Suite App06)
-# Usage: powershell -ExecutionPolicy Bypass -File scripts/build.ps1
-
-$ErrorActionPreference = "Stop"
-
-$ProjectRoot = Resolve-Path "$PSScriptRoot\.."
-Set-Location $ProjectRoot
-
-Write-Host "=========================================" -ForegroundColor Cyan
-Write-Host " Stepwise Build Automation (App06)       " -ForegroundColor Cyan
-Write-Host "=========================================" -ForegroundColor Cyan
-
-# 0. Resolve Version from pyproject.toml
-$pyprojectContent = Get-Content "$ProjectRoot\pyproject.toml" -Raw
-$versionMatch = [regex]::Match($pyprojectContent, 'version\s*=\s*["'']([^"'']+)["'']')
-if ($versionMatch.Success) {
-    $Version = $versionMatch.Groups[1].Value
-} else {
-    $Version = "0.2.1"
+# Produce an unsigned application bundle only. Official release files are untouched.
+[CmdletBinding()]
+param()
+$ErrorActionPreference = 'Stop'
+$ProjectRoot = (Resolve-Path "$PSScriptRoot\..").Path
+Set-Location -LiteralPath $ProjectRoot
+. "$PSScriptRoot\release_helpers.ps1"
+$Version = ([regex]::Match((Get-Content pyproject.toml -Raw), '(?m)^version\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)"')).Groups[1].Value
+if (-not $Version) { throw 'A valid project version is required.' }
+$Commit = & git rev-parse HEAD
+if ($LASTEXITCODE -ne 0) { throw 'Cannot resolve source commit.' }
+$SourceState = @(& git status --porcelain)
+if ($LASTEXITCODE -ne 0) { throw 'Cannot check source state.' }
+$Dirty = $SourceState.Count -ne 0
+$RunRoot = Join-Path $ProjectRoot ('build\unsigned\' + [guid]::NewGuid().ToString('N'))
+Assert-OwnedBuildPath $RunRoot $ProjectRoot
+[IO.Directory]::CreateDirectory($RunRoot) | Out-Null
+$PythonExe = Join-Path $ProjectRoot '.venv\Scripts\python.exe'
+if (-not (Test-Path -LiteralPath $PythonExe)) { $PythonExe = 'python' }
+$testCommands = @('python -m pytest tests -q', 'tests/Test-SignToolDiscovery.ps1', 'tests/Test-ReleasePipeline.ps1', 'tests/Test-ReleaseOrchestration.ps1', 'scripts/test_user_data_backup.ps1')
+$testLog = Join-Path $RunRoot 'test-results.txt'
+$previousQtPlatform = $env:QT_QPA_PLATFORM
+try {
+    $env:QT_QPA_PLATFORM = 'offscreen'
+    & $PythonExe -m pytest tests -q 2>&1 | Tee-Object -FilePath $testLog
+    if ($LASTEXITCODE -ne 0) { throw 'Application tests failed; build is not release eligible.' }
+} finally { $env:QT_QPA_PLATFORM = $previousQtPlatform }
+foreach ($test in $testCommands[1..4]) {
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ProjectRoot $test) 2>&1 | Tee-Object -FilePath $testLog -Append
+    if ($LASTEXITCODE -ne 0) { throw "Release test failed: $test" }
 }
-Write-Host "Target Version: $Version" -ForegroundColor Yellow
-
-# 1. Clean previous build directories
-$BuildDir = "$ProjectRoot\build"
-$DistDir = "$ProjectRoot\dist"
-$ReleaseDistDir = "$ProjectRoot\release\dist"
-
-if (Test-Path $BuildDir) { Remove-Item -Recurse -Force $BuildDir }
-if (Test-Path $DistDir) { Remove-Item -Recurse -Force $DistDir }
-if (!(Test-Path $ReleaseDistDir)) { New-Item -ItemType Directory -Force $ReleaseDistDir | Out-Null }
-
-# 2. Run PyInstaller
-Write-Host "[1/4] Running PyInstaller onedir build..." -ForegroundColor Yellow
-$PythonExe = "$ProjectRoot\.venv\Scripts\python.exe"
-if (!(Test-Path $PythonExe)) {
-    $PythonExe = "python"
-}
-
-& $PythonExe -m PyInstaller "$ProjectRoot\installer\stepwise.spec" --noconfirm
-
-if ($LASTEXITCODE -ne 0) {
-    Write-Error "PyInstaller build failed with exit code $LASTEXITCODE."
-    exit $LASTEXITCODE
-}
-
-# 3. Calculate Build Size and create portable zip
-$OnedirSizeMB = [math]::Round(((Get-ChildItem -Recurse "$DistDir\Stepwise" | Measure-Object -Property Length -Sum).Sum / 1MB), 2)
-Write-Host "PyInstaller package built at $DistDir\Stepwise ($OnedirSizeMB MB)" -ForegroundColor Green
-
-Write-Host "[2/4] Packaging portable ZIP archive..." -ForegroundColor Yellow
-$portableZip = "$ReleaseDistDir\Stepwise.v$Version.zip"
-if (Test-Path $portableZip) { Remove-Item -Force $portableZip }
-Compress-Archive -Path "$DistDir\Stepwise\*" -DestinationPath $portableZip -CompressionLevel Optimal
-Write-Host "Portable ZIP created: $portableZip" -ForegroundColor Green
-
-# 4. Compile Inno Setup
-Write-Host "[3/4] Compiling Inno Setup installer..." -ForegroundColor Yellow
-$IsccPaths = @(
-    "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
-    "C:\Program Files\Inno Setup 6\ISCC.exe",
-    "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe",
-    (Get-Command ISCC.exe -ErrorAction SilentlyContinue).Source
-)
-
-$IsccExe = $IsccPaths | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
-
-if ($IsccExe) {
-    $issFile = "$ProjectRoot\installer\setup.iss"
-    if (!(Test-Path $issFile)) {
-        $issFile = "$ProjectRoot\installer\stepwise.iss"
-    }
-    Write-Host "Compiling installer using $IsccExe..." -ForegroundColor Cyan
-    & $IsccExe "/DMyAppVersion=$Version" $issFile
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host "Enterprise installer generated in $ReleaseDistDir" -ForegroundColor Green
-
-        # 5. Create Dual Naming Alias
-        Write-Host "[4/4] Generating Dual Naming artifacts..." -ForegroundColor Yellow
-        $enterpriseInstaller = "$ReleaseDistDir\App06_Stepwise-Setup_v$Version.exe"
-        $publicInstaller = "$ReleaseDistDir\Stepwise-Setup.v$Version.exe"
-
-        if (Test-Path $enterpriseInstaller) {
-            Copy-Item -LiteralPath $enterpriseInstaller -Destination $publicInstaller -Force
-            Write-Host "Public installer alias generated: $publicInstaller" -ForegroundColor Green
-        }
-    } else {
-        Write-Warning "Inno Setup compilation failed with code $LASTEXITCODE."
-    }
-} else {
-    Write-Warning "Inno Setup compiler not found on system PATH. Onedir build is ready in $DistDir\Stepwise."
-}
-
-Write-Host "=========================================" -ForegroundColor Green
-Write-Host " Build Process Completed Successfully!   " -ForegroundColor Green
-Write-Host "=========================================" -ForegroundColor Green
+& $PythonExe -m PyInstaller "$ProjectRoot\installer\stepwise.spec" --noconfirm --distpath "$RunRoot\dist" --workpath "$RunRoot\work"
+if ($LASTEXITCODE -ne 0) { throw 'PyInstaller build failed; official release files were not changed.' }
+$Bundle = Join-Path $RunRoot 'dist\Stepwise'
+if (-not (Test-Path -LiteralPath "$Bundle\Stepwise.exe")) { throw 'Built application is missing.' }
+$finalCommit = & git rev-parse HEAD
+if ($LASTEXITCODE -ne 0 -or $finalCommit -ne $Commit) { throw 'Source commit changed during build.' }
+$finalStatus = @(& git status --porcelain)
+if ($LASTEXITCODE -ne 0 -or ($finalStatus -join "`n") -cne ($SourceState -join "`n")) { throw 'Source state changed during build.' }
+Write-ReleaseJson (Join-Path $RunRoot 'build-input.json') ([ordered]@{
+    product_id = 'App06_Stepwise'; version = $Version; git_commit = $Commit
+    source_dirty = $Dirty; built_at_utc = [DateTime]::UtcNow.ToString('o')
+    tests_passed = $true; test_commands = $testCommands
+    test_results_sha256 = (Get-FileHash -LiteralPath $testLog -Algorithm SHA256).Hash.ToLowerInvariant()
+    bundle = @(Get-BundleInventory $Bundle)
+})
+Write-Output "Unsigned bundle: $Bundle"
+if ($Dirty) { Write-Warning 'Developer build has uncommitted source changes and cannot be signed as an official release.' }
+Write-Output "After committing and rebuilding, run scripts\sign.ps1 -BuildRoot `"$RunRoot`". Signing does not publish unless -Publish is specified."

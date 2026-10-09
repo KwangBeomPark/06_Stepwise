@@ -11,6 +11,7 @@ import os
 import sys
 import tempfile
 from pathlib import Path
+from threading import Event
 from typing import Any
 
 APPLICATION_NAME = "Stepwise"
@@ -55,9 +56,10 @@ def user_settings_directory() -> Path:
         try:
             candidate.mkdir(parents=True, exist_ok=True)
             # Verify write permissions
-            test_probe = candidate / ".write_probe"
-            test_probe.write_text("ok", encoding="utf-8")
-            test_probe.unlink(missing_ok=True)
+            with tempfile.TemporaryFile(
+                mode="w", encoding="utf-8", dir=candidate, prefix=".write-probe-"
+            ) as probe:
+                probe.write("ok")
             return candidate
         except OSError:
             pass
@@ -107,13 +109,26 @@ def load_user_settings() -> dict[str, Any]:
     return settings
 
 
+def _assert_existing_settings_readable(path: Path) -> None:
+    """Refuse to replace damaged settings that were loaded using defaults."""
+    try:
+        content = path.read_text(encoding="utf-8")
+        if not isinstance(json.loads(content), dict):
+            raise ValueError("Settings must be a JSON object")
+    except FileNotFoundError:
+        return
+    except (ValueError, UnicodeError) as exc:
+        raise OSError(
+            "Existing settings are damaged. Keep a backup and repair the file before saving."
+        ) from exc
+
+
 def save_user_settings(settings: dict[str, Any]) -> None:
     """Save user settings to settings.json atomically to avoid corruption."""
-    import time
-
     cfg_path = config_file_path()
     cfg_dir = cfg_path.parent
     cfg_dir.mkdir(parents=True, exist_ok=True)
+    _assert_existing_settings_readable(cfg_path)
 
     # Clean dict to ensure JSON serializability
     serializable = {}
@@ -128,18 +143,22 @@ def save_user_settings(settings: dict[str, Any]) -> None:
     try:
         with os.fdopen(temp_fd, "w", encoding="utf-8") as f:
             f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
 
         # Windows retry loop for os.replace to tolerate transient file locks
         replaced = False
         last_err: Exception | None = None
         for attempt in range(3):
             try:
+                _assert_existing_settings_readable(cfg_path)
                 os.replace(temp_path, cfg_path)
                 replaced = True
                 break
             except PermissionError as pe:
                 last_err = pe
-                time.sleep(0.05 * (2**attempt))
+                if attempt < 2:
+                    Event().wait(0.05 * (2**attempt))
 
         if not replaced and last_err:
             raise last_err

@@ -1,210 +1,122 @@
-# Stepwise One-Click Digital Signing & GitHub Release Pipeline (PL Suite App06)
-# Run in an ELEVATED (Administrator) PowerShell window:
-# powershell -ExecutionPolicy Bypass -File scripts\sign.ps1
-
-$ErrorActionPreference = 'Stop'
-$projectRoot = Resolve-Path "$PSScriptRoot\.."
-Set-Location -LiteralPath $projectRoot
-
-Write-Host "=========================================" -ForegroundColor Cyan
-Write-Host " Stepwise Digital Signing Pipeline       " -ForegroundColor Cyan
-Write-Host "=========================================" -ForegroundColor Cyan
-
-# 0. Administrator check
-$principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
-if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    Write-Error "This script MUST be run in an Administrator PowerShell window. Please right-click PowerShell -> 'Run as Administrator'."
-    exit 1
-}
-
-# 1. Resolve Version from pyproject.toml
-$pyprojectContent = Get-Content "$projectRoot\pyproject.toml" -Raw
-$versionMatch = [regex]::Match($pyprojectContent, 'version\s*=\s*["'']([^"'']+)["'']')
-if ($versionMatch.Success) {
-    $Version = $versionMatch.Groups[1].Value
-} else {
-    $Version = "0.2.1"
-}
-$tag = "v$Version"
-Write-Host "Target Version: $Version (Tag: $tag)" -ForegroundColor Yellow
-
-# 2. Ensure Smart Card Services are active
-Write-Host "[1/7] Ensuring Smart Card services are active..." -ForegroundColor Yellow
-Start-Service SCardSvr, CertPropSvc, ScDeviceEnum -ErrorAction SilentlyContinue
-
-# 3. Locate certificate
-$thumbprint = "E9C72CF5090840A1805296525D56BE680622A7FD"
-$cert = Get-Item "Cert:\CurrentUser\My\$thumbprint" -ErrorAction SilentlyContinue
-if (-not $cert) {
-    $cert = Get-Item "Cert:\LocalMachine\My\$thumbprint" -ErrorAction SilentlyContinue
-}
-if (-not $cert) {
-    Write-Error "Code signing certificate [$thumbprint] not found in Cert: store. Please ensure SimplySign is logged in."
-    exit 1
-}
-Write-Host "Certificate found: $($cert.Subject)" -ForegroundColor Green
-
-# 4. Locate SignTool
-$signtoolPaths = @(
-    "$projectRoot\release\build\signtool\signtool.exe",
-    "C:\Users\parkk\.codex\worktrees\antigravity-aggregation-review\04_DataRefinery\release\build\windows-sdk-buildtools-10.0.28000.2705\package\bin\10.0.28000.0\x64\signtool.exe",
-    (Get-Command signtool.exe -ErrorAction SilentlyContinue).Source
+# Explicit signing of a clean provenance-checked build; publishing is opt-in.
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory=$true)][string]$BuildRoot,
+    [string]$SignToolPath = $env:SIGNTOOL_PATH,
+    [string]$CertificateThumbprint = $env:STEPWISE_SIGNING_THUMBPRINT,
+    [string]$InnoCompilerPath,
+    [switch]$Publish
 )
-$signtool = $signtoolPaths | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
-
-if (-not $signtool) {
-    Write-Error "SignTool not found on system."
-    exit 1
+$ErrorActionPreference = 'Stop'
+$projectRoot = (Resolve-Path "$PSScriptRoot\..").Path
+Set-Location -LiteralPath $projectRoot
+. "$PSScriptRoot\release_helpers.ps1"
+function Find-SuiteSignTool {
+    param([string]$RequestedPath)
+    if ($RequestedPath) {
+        if (-not (Test-Path -LiteralPath $RequestedPath -PathType Leaf)) {
+            throw 'The specified SignTool path does not exist.'
+        }
+        return (Resolve-Path -LiteralPath $RequestedPath).Path
+    }
+    $candidates = @()
+    $onPath = Get-Command signtool.exe -ErrorAction SilentlyContinue
+    if ($onPath) { $candidates += $onPath.Source }
+    $candidates += Join-Path $projectRoot 'tools\signtool\signtool.exe'
+    foreach ($sdkRoot in @(${env:ProgramFiles(x86)}, $env:ProgramFiles)) {
+        if (-not $sdkRoot) { continue }
+        $sdkBin = Join-Path $sdkRoot 'Windows Kits\10\bin'
+        $versions = @(Get-ChildItem -LiteralPath $sdkBin -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match '^\d+\.\d+\.\d+\.\d+$' } |
+            Sort-Object { [version]$_.Name } -Descending)
+        foreach ($directory in $versions) {
+            $candidates += Join-Path $directory.FullName 'x64\signtool.exe'
+        }
+        $candidates += Join-Path $sdkBin 'x64\signtool.exe'
+    }
+    foreach ($candidate in $candidates) {
+        if ($candidate -and (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+            return (Resolve-Path -LiteralPath $candidate).Path
+        }
+    }
+    throw 'Provide -SignToolPath, SIGNTOOL_PATH, SignTool on PATH, or install the Windows SDK.'
 }
-
-function Invoke-SignBinary {
-    param([string]$FilePath)
-    Write-Host "Signing $(Split-Path -Leaf $FilePath)..." -ForegroundColor Cyan
-    & $signtool sign /sha1 $thumbprint /fd sha256 /tr http://timestamp.digicert.com /td sha256 /v $FilePath
-    if ($LASTEXITCODE -ne 0) {
-        Write-Warning "Primary timestamp server failed. Retrying with Certum timestamp..."
-        & $signtool sign /sha1 $thumbprint /fd sha256 /tr http://time.certum.pl /td sha256 /v $FilePath
-        if ($LASTEXITCODE -ne 0) {
-            throw "Failed to sign $FilePath"
+$Version = ([regex]::Match((Get-Content pyproject.toml -Raw), '(?m)^version\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)"')).Groups[1].Value
+if (-not $Version) { throw 'A valid project version is required.' }
+$Commit = & git rev-parse HEAD
+if ($LASTEXITCODE -ne 0) { throw 'Cannot resolve source commit.' }
+$sourceStatus = @(& git status --porcelain)
+if ($LASTEXITCODE -ne 0 -or $sourceStatus.Count) { throw 'Commit all source changes and rebuild before release signing.' }
+$BuildRoot = (Resolve-Path -LiteralPath $BuildRoot).Path
+$allowed = [IO.Path]::GetFullPath((Join-Path $projectRoot 'build\unsigned')).TrimEnd('\') + '\'
+if (-not $BuildRoot.StartsWith($allowed, [StringComparison]::OrdinalIgnoreCase)) { throw 'BuildRoot must be an owned unsigned build directory.' }
+$ancestor = $BuildRoot
+while ($ancestor.Length -gt $projectRoot.Length) {
+    if ((Get-Item -LiteralPath $ancestor).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Build path must not contain reparse points.' }
+    $ancestor = Split-Path -Parent $ancestor
+}
+$inputManifest = Get-Content -LiteralPath "$BuildRoot\build-input.json" -Raw | ConvertFrom-Json
+if ($inputManifest.product_id -ne 'App06_Stepwise' -or $inputManifest.version -ne $Version -or $inputManifest.git_commit -ne $Commit -or $inputManifest.source_dirty -ne $false -or $inputManifest.tests_passed -ne $true) { throw 'Build provenance does not match tested clean current source.' }
+if ((Get-FileHash -LiteralPath "$BuildRoot\test-results.txt" -Algorithm SHA256).Hash.ToLowerInvariant() -cne $inputManifest.test_results_sha256) { throw 'Build test evidence changed or is missing.' }
+$unsignedBundle = Join-Path $BuildRoot 'dist\Stepwise'
+Assert-BundleInventory $unsignedBundle $inputManifest.bundle
+if (-not $CertificateThumbprint) { throw 'Provide -CertificateThumbprint or STEPWISE_SIGNING_THUMBPRINT.' }
+$signtool = Find-SuiteSignTool -RequestedPath $SignToolPath
+$cert = Get-Item "Cert:\CurrentUser\My\$CertificateThumbprint" -ErrorAction Stop
+if (-not $cert.HasPrivateKey) { throw 'Signing certificate has no available private key.' }
+if ($cert.NotAfter -lt (Get-Date)) { throw 'Signing certificate expired.' }
+if (-not $InnoCompilerPath) {
+    $foundCompiler = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+    if ($foundCompiler) { $InnoCompilerPath = $foundCompiler.Source }
+    foreach ($base in @(${env:ProgramFiles(x86)}, $env:ProgramFiles, (Join-Path $env:LOCALAPPDATA 'Programs'))) {
+        if ($InnoCompilerPath) { break }
+        foreach ($major in @(7,6)) {
+            $candidate = Join-Path $base "Inno Setup $major\ISCC.exe"
+            if (Test-Path -LiteralPath $candidate) { $InnoCompilerPath = $candidate; break }
         }
     }
 }
-
-# 5. Sign main application binary
-$appExe = "$projectRoot\dist\Stepwise\Stepwise.exe"
-if (-not (Test-Path $appExe)) {
-    Write-Error "Stepwise.exe not found at $appExe. Run scripts\build.ps1 first."
-    exit 1
+if (-not $InnoCompilerPath -or -not (Test-Path -LiteralPath $InnoCompilerPath -PathType Leaf)) { throw 'Inno Setup compiler is required.' }
+$runRoot = Join-Path $projectRoot ('build\release-staging\' + [guid]::NewGuid().ToString('N'))
+Assert-OwnedBuildPath $runRoot $projectRoot
+$bundle = Join-Path $runRoot 'Stepwise'
+$stage = Join-Path $runRoot 'artifacts'
+[IO.Directory]::CreateDirectory($stage) | Out-Null
+Copy-Item -LiteralPath $unsignedBundle -Destination $bundle -Recurse
+Assert-BundleInventory $bundle $inputManifest.bundle
+function Invoke-SignBinary([string]$Path) {
+    & $signtool sign /sha1 $CertificateThumbprint /fd sha256 /tr http://timestamp.digicert.com /td sha256 $Path
+    if ($LASTEXITCODE -ne 0) { throw "Signing failed: $(Split-Path -Leaf $Path). Official release files were not changed." }
+    Assert-ReleaseSignature $Path $CertificateThumbprint
 }
-Write-Host "[2/7] Digitally signing Stepwise.exe..." -ForegroundColor Yellow
-Invoke-SignBinary -FilePath $appExe
-
-# 6. Compile Inno Setup installer
-Write-Host "[3/7] Compiling installer with Inno Setup..." -ForegroundColor Yellow
-$isccPaths = @(
-    "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
-    "C:\Program Files\Inno Setup 6\ISCC.exe",
-    "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe",
-    (Get-Command ISCC.exe -ErrorAction SilentlyContinue).Source
-)
-$iscc = $isccPaths | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
-if (-not $iscc) {
-    Write-Error "Inno Setup compiler (ISCC.exe) not found."
-    exit 1
-}
-
-$issFile = "$projectRoot\installer\setup.iss"
-if (!(Test-Path $issFile)) { $issFile = "$projectRoot\installer\stepwise.iss" }
-
-& $iscc "/DMyAppVersion=$Version" $issFile
-if ($LASTEXITCODE -ne 0) {
-    Write-Error "Inno Setup compilation failed with code $LASTEXITCODE"
-    exit $LASTEXITCODE
-}
-
-# 7. Generate and Sign Dual Naming Installers
-Write-Host "[4/7] Signing Dual Naming Installers..." -ForegroundColor Yellow
-$releaseDistDir = "$projectRoot\release\dist"
-$enterpriseInstaller = "$releaseDistDir\App06_Stepwise-Setup_v$Version.exe"
-$publicInstaller = "$releaseDistDir\Stepwise-Setup.v$Version.exe"
-
-if (Test-Path $enterpriseInstaller) {
-    Invoke-SignBinary -FilePath $enterpriseInstaller
-    Copy-Item -LiteralPath $enterpriseInstaller -Destination $publicInstaller -Force
-    Invoke-SignBinary -FilePath $publicInstaller
-} else {
-    Write-Error "Installer executable not found: $enterpriseInstaller"
-    exit 1
-}
-
-# 8. Stage to release/ root and generate checksums & manifest
-Write-Host "[5/7] Staging official release artifacts to release/..." -ForegroundColor Yellow
-$releaseRootDir = "$projectRoot\release"
-if (-not (Test-Path $releaseRootDir)) { New-Item -ItemType Directory -Force $releaseRootDir | Out-Null }
-
-$artifacts = @(
-    $enterpriseInstaller,
-    $publicInstaller
-)
-$portableZip = "$releaseDistDir\Stepwise.v$Version.zip"
-if (Test-Path $portableZip) {
-    $artifacts += $portableZip
-}
-
-$stagedFiles = @()
-foreach ($art in $artifacts) {
-    $dest = "$releaseRootDir\$(Split-Path -Leaf $art)"
-    Copy-Item -LiteralPath $art -Destination $dest -Force
-    $stagedFiles += $dest
-}
-
-# Generate SHA256SUMS.txt (UTF-8 No-BOM)
-$checksumLines = @()
-foreach ($file in $stagedFiles) {
-    $hash = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
-    $leaf = Split-Path -Leaf $file
-    $checksumLines += "$hash  $leaf"
-}
-$checksumPath = "$releaseRootDir\SHA256SUMS.txt"
-$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-[System.IO.File]::WriteAllLines($checksumPath, $checksumLines, $utf8NoBom)
-Write-Host "Generated: SHA256SUMS.txt" -ForegroundColor Green
-
-# Generate build-manifest.json
-$gitCommit = (& git rev-parse HEAD 2>$null)
-if (-not $gitCommit) { $gitCommit = "unknown" }
-
-$manifest = [ordered]@{
-    product_id = "App06_Stepwise"
-    app_name = "Stepwise"
-    version = $Version
-    git_commit = $gitCommit
-    build_time = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssK")
-    certificate_thumbprint = $thumbprint
-    signer_subject = $cert.Subject
-    artifacts = @($stagedFiles | ForEach-Object { Split-Path -Leaf $_ })
-}
-$manifestPath = "$releaseRootDir\build-manifest.json"
-$manifestJson = $manifest | ConvertTo-Json -Depth 4
-[System.IO.File]::WriteAllText($manifestPath, $manifestJson, $utf8NoBom)
-Write-Host "Generated: build-manifest.json" -ForegroundColor Green
-
-# 9. Verify Signatures
-Write-Host "[6/7] Verifying all Authenticode signatures..." -ForegroundColor Yellow
-foreach ($bin in @($appExe, $enterpriseInstaller, $publicInstaller)) {
-    $sig = Get-AuthenticodeSignature -LiteralPath $bin
-    if ($sig.Status -ne "Valid") {
-        Write-Error "Signature invalid for: $bin ($($sig.StatusMessage))"
-        exit 1
-    }
-    Write-Host "Verified Valid: $(Split-Path -Leaf $bin)" -ForegroundColor Green
-}
-
-# 10. Publish to GitHub Release
-Write-Host "[7/7] Publishing artifacts to GitHub Release $tag..." -ForegroundColor Yellow
-$uploadFiles = @($stagedFiles) + @($checksumPath, $manifestPath)
-
-$releaseList = & gh release list --limit 50 2>$null
-$releaseExists = ($releaseList -match "\b$([regex]::Escape($tag))\b")
-
-if (-not $releaseExists) {
-    Write-Host "Creating GitHub Release $tag..." -ForegroundColor Cyan
-    & gh release create $tag @uploadFiles --title "v$Version - Stepwise Release" --generate-notes
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host "Successfully created GitHub Release $tag!" -ForegroundColor Green
-    } else {
-        Write-Warning "Failed to create GitHub Release. Check gh auth status."
-    }
-} else {
-    Write-Host "Updating existing GitHub Release $tag..." -ForegroundColor Cyan
-    & gh release upload $tag @uploadFiles --clobber
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host "Successfully uploaded all assets to GitHub Release $tag!" -ForegroundColor Green
-    } else {
-        Write-Warning "Failed to upload to GitHub Release. Check gh auth status."
-    }
-}
-
-Write-Host "=========================================" -ForegroundColor Green
-Write-Host " PL Suite App06 Release Complete 100%!   " -ForegroundColor Green
-Write-Host "=========================================" -ForegroundColor Green
+# Only the explicitly invoked signing pipeline accesses the user's signing session.
+Invoke-SignBinary (Join-Path $bundle 'Stepwise.exe')
+& $InnoCompilerPath "/DMyAppVersion=$Version" "/DMyAppSourceDir=$bundle" "/DMyAppOutputDir=$stage" "$projectRoot\installer\setup.iss"
+if ($LASTEXITCODE -ne 0) { throw 'Installer compilation failed; official release files were not changed.' }
+$enterprise = Join-Path $stage "App06_Stepwise_Setup_v$Version.exe"
+Invoke-SignBinary $enterprise
+$names = @((Split-Path -Leaf $enterprise))
+$artifacts = @($names | ForEach-Object {
+    [ordered]@{ name = $_; sha256 = (Get-FileHash -LiteralPath (Join-Path $stage $_) -Algorithm SHA256).Hash.ToLowerInvariant() }
+})
+Write-ReleaseJson (Join-Path $stage "build-manifest.v$Version.json") ([ordered]@{
+    product_id = 'App06_Stepwise'; app_name = 'Stepwise'; version = $Version
+    git_commit = $Commit; built_at_utc = $inputManifest.built_at_utc
+    verified_at_utc = [DateTime]::UtcNow.ToString('o'); source_dirty = $false
+    certificate_thumbprint = $CertificateThumbprint; signer_subject = $cert.Subject
+    signature_policy = 'Valid expected-signer Authenticode with timestamp'
+    tests_passed = $inputManifest.tests_passed; test_commands = $inputManifest.test_commands
+    test_results_sha256 = $inputManifest.test_results_sha256
+    signed_bundle = @(Get-BundleInventory $bundle); artifacts = $artifacts
+})
+[IO.File]::WriteAllLines((Join-Path $stage "SHA256SUMS.v$Version.txt"), @($artifacts | ForEach-Object { "$($_.sha256)  $($_.name)" }), (New-Object Text.UTF8Encoding($false)))
+$releaseNames = @(Assert-ReleaseArtifacts $stage $Version $Commit $CertificateThumbprint)
+$finalCommit = & git rev-parse HEAD
+if ($LASTEXITCODE -ne 0 -or $finalCommit -ne $Commit) { throw 'Source commit changed while signing; release promotion refused.' }
+$finalStatus = @(& git status --porcelain)
+if ($LASTEXITCODE -ne 0 -or $finalStatus.Count) { throw 'Source changed while signing; release promotion refused.' }
+Publish-LocalRelease $stage (Join-Path $projectRoot 'release') $releaseNames
+Write-Output "Verified local release prepared: $Version. Existing versions and generic metadata were preserved."
+if ($Publish) {
+    Publish-GitHubRelease (Join-Path $projectRoot 'release') $releaseNames "v$Version" $Commit (Join-Path $runRoot 'remote-verification')
+} else { Write-Output 'GitHub publication was not requested.' }

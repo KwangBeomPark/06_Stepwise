@@ -72,7 +72,7 @@ Workflows are structured into an intuitive, sequential 3-part hierarchy:
 
 ### 1. Install via User Installer (For General Users)
 Installs cleanly into user space (`%LOCALAPPDATA%\Programs\Stepwise`) without requiring IT administrator rights.
-- Download and run [release/dist/Stepwise-Setup-0.1.0.exe](release/dist/Stepwise-Setup-0.1.0.exe)
+- Download the installer from [GitHub Releases](https://github.com/KwangBeomPark/06_Stepwise/releases).
 - Launch `Stepwise` directly from your Desktop shortcut or Start Menu.
 
 ### 2. Run from Source (For Developers)
@@ -116,7 +116,8 @@ Stepwise is engineered to rigorous quality and reliability standards:
 │   ├── it-request.md        # Corporate IT & EDR security whitelist request
 │   └── m0-report.md         # Windows OS spike & technical validation report
 ├── installer/
-│   ├── stepwise.iss         # Inno Setup 6 non-admin installer script
+│   ├── setup.iss            # Canonical non-admin installer definition
+│   ├── stepwise.iss         # Compatibility include of setup.iss
 │   └── stepwise.spec        # PyInstaller onedir optimization bundle spec
 ├── release/dist/
 │   └── Stepwise-Setup-0.1.0.exe # Standalone distribution installer
@@ -147,3 +148,15 @@ Having experienced firsthand the exhaustion and risks of manual data entry in le
 ## 📄 License
 
 This project is licensed under the [MIT License](LICENSE).
+
+
+Shared installation, settings, release goals, and current exceptions are documented in [Suite standardization](docs/SUITE_STANDARDIZATION.md).
+
+[Public code map](docs/CODE_MAP.md) explains the app's paths and module responsibilities.
+[Backup and verified restore](docs/USER_DATA.md) covers the complete UserSetting folder,
+including results by default; `-SettingsOnly` excludes default results. Custom macro/result
+folders and source Excel/CSV require separate backups. Use the Windows PowerShell
+[backup tool](scripts/Manage-UserData.ps1). Settings save failures stay visible and keep the dialog open.
+See [settings, layout and UI verification](docs/STANDARDIZATION_PHASE3_5_REVIEW.md).
+
+Release preparation separates unsigned builds from official files. Run `scripts/build.ps1` to create a unique `build/unsigned` bundle; after committing and rebuilding, run `scripts/sign.ps1 -BuildRoot <printed-directory> -CertificateThumbprint <your-certificate-thumbprint>` in your interactive signing session. It signs the application before packaging and creates one installer, `App06_Stepwise_Setup_v<version>.exe`, with `build-manifest.v<version>.json` and `SHA256SUMS.v<version>.txt`. No installer alias or portable ZIP is generated. Version-specific metadata preserves existing generic ledgers. GitHub publication requires the separate `-Publish` switch and an existing remote tag at the same commit. Existing remote assets are compared and only missing matching assets are added. See the current [release checklist](RELEASE_CHECKLIST.md).

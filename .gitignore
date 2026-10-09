@@ -16,6 +16,12 @@ __pycache__/
 
 # PL Suite UserSetting & Local runtime data
 UserSetting/
+.env
+.env.*
+!.env.example
+*.pfx
+*.p12
+*.key
 recovery/
 logs/
 results/

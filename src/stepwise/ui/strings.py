@@ -21,6 +21,11 @@ class Strings:
     DATA_FILE = "Data:"
     NO_DATA = "No data connected"
     SETTINGS = "Settings"
+    SETTINGS_SAVE_FAILED = "Settings were not saved. Check folder permissions and available disk space, then try again."
+    OPEN_SETTINGS_FOLDER = "Open Settings Folder"
+    OPEN_RESULTS_FOLDER = "Open Results Folder"
+    BACKUP_SCOPE = "Back up the settings folder and your macro library. Include results if needed. Custom folders and source data must be backed up separately."
+    FOLDER_OPEN_FAILED = "The folder could not be opened. Check that it exists and you have permission to access it."
 
     RUN_ERROR_TITLE = "Run Cancelled"
     SNAPSHOT_ERROR = "The run could not be prepared. Try again.\n{error}"

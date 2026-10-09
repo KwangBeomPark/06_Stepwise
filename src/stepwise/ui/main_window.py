@@ -38,6 +38,7 @@ from PySide6.QtWidgets import (
 
 from stepwise.core.app_paths import (
     default_library_directory,
+    default_results_directory,
     load_user_settings,
     save_user_settings,
 )
@@ -73,6 +74,7 @@ class ExecutionSnapshot:
     row_numbers: tuple[int, ...]
     package_dir: str
     data_filepath: str | None
+    results_dir: str
     speed: SpeedMode
     start_row_index: int
     skip_setup: bool
@@ -733,6 +735,7 @@ class MainWindow(QMainWindow):
             row_numbers=self._data_row_nums,
             package_dir=self._package_dir,
             data_file_path=self._data_filepath,
+            results_dir=str(self._user_settings.get("results_dir") or default_results_directory()),
             parent=self,
         )
         if dlg.exec() != PreflightDialog.Accepted:
@@ -781,6 +784,7 @@ class MainWindow(QMainWindow):
                 row_numbers=tuple(row_nums_snapshot),
                 package_dir=self._package_dir,
                 data_filepath=self._data_filepath,
+                results_dir=str(self._user_settings.get("results_dir") or default_results_directory()),
                 speed=opts.get("speed", SpeedMode.NORMAL),
                 start_row_index=max(0, opts.get("start_row", 1) - 1),
                 skip_setup=opts.get("skip_setup", False),
@@ -853,6 +857,7 @@ class MainWindow(QMainWindow):
                     package_dir=snapshot.package_dir,
                     countdown_seconds=0.0,
                     data_filepath=snapshot.data_filepath,
+                    results_dir=snapshot.results_dir,
                     row_numbers=snapshot.row_numbers,
                 )
             except Exception as e:

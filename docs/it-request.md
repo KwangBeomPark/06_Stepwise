@@ -20,8 +20,8 @@ This document provides corporate IT and Cyber Security teams with technical spec
 
 - **Privilege Level**: **Standard User (Non-Admin)**. Stepwise runs entirely in user-space and does **not** require elevation or local Administrator rights.
 - **Installation Directory**: `%LOCALAPPDATA%\Programs\Stepwise\`
-- **User Data & Settings**: `%APPDATA%\Stepwise\settings.json`
-- **Audit Logs**: `%LOCALAPPDATA%\Stepwise\logs\`
+- **User Data & Settings**: `<writable app folder>\UserSetting\settings.json`; source/fallback uses `%LOCALAPPDATA%\Programs\Stepwise\UserSetting`.
+- **Run Results**: `UserSetting\results` by default, or the configured results folder. Results CSV and failure screenshots are diagnostic records; no separate app log file is currently written.
 - **Registry Changes**: Only creates `.swm` file association in `HKEY_CURRENT_USER\Software\Classes\` (No HKLM modifications).
 
 ---

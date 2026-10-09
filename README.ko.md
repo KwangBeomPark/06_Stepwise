@@ -72,7 +72,7 @@
 
 ### 1. 인스톨러로 간편 설치 (일반 사용자용)
 사내 IT 관리자 권한 없이 일반 사용자 폴더(`%LOCALAPPDATA%\Programs\Stepwise`)에 설치됩니다.
-- [release/dist/Stepwise-Setup-0.1.0.exe](release/dist/Stepwise-Setup-0.1.0.exe) 실행
+- [GitHub Releases](https://github.com/KwangBeomPark/06_Stepwise/releases)에서 설치 파일을 내려받아 실행합니다.
 - 바탕화면 바로가기 또는 시작 메뉴에서 `Stepwise` 실행
 
 ### 2. 소스 코드에서 바로 실행 (개발자용)
@@ -116,7 +116,8 @@ Stepwise는 엔터프라이즈 환경에서의 무결성과 안정성을 보장�
 │   ├── it-request.md        # 사내 IT 보안 승인용 화이트리스트 신청서
 │   └── m0-report.md         # Windows 9대 환경 검증 기술 스파이크 보고서
 ├── installer/
-│   ├── stepwise.iss         # Inno Setup 6 논어드민 설치 스크립트
+│   ├── setup.iss            # 유일한 논어드민 설치 정의
+│   ├── stepwise.iss         # setup.iss를 포함하는 호환 진입점
 │   └── stepwise.spec        # PyInstaller Onedir 빌드 최적화 스펙
 ├── release/dist/
 │   └── Stepwise-Setup-0.1.0.exe # 배포용 단일 설치 프로그램
@@ -147,3 +148,15 @@ Stepwise는 엔터프라이즈 환경에서의 무결성과 안정성을 보장�
 ## 📄 라이선스 (License)
 
 본 프로젝트는 [MIT License](LICENSE)에 따라 자유롭게 사용, 수정, 배포할 수 있습니다.
+
+
+공통 설치·설정·배포 정비의 기준과 현재 예외는 [6개 앱 공통 정비 기준](docs/SUITE_STANDARDIZATION.md)을 참고하세요.
+
+[공개 코드 지도](docs/CODE_MAP.md)에서 모듈과 실제 설정·결과 저장 흐름을 확인할 수 있습니다.
+[백업·검증 복원 안내](docs/USER_DATA.md)와 [백업 도구](scripts/Manage-UserData.ps1)는
+UserSetting 전체를 기본으로 보존하며 `-SettingsOnly`는 기본 결과 폴더를 제외합니다.
+사용자 지정 외부 매크로·결과 폴더 및 원본 Excel/CSV는 별도로 백업해야 합니다.
+설정 저장 실패 시 창을 닫지 않고 원래 값과 저장 파일을 보존합니다.
+[설정·구조·사용 문구 검수](docs/STANDARDIZATION_PHASE3_5_REVIEW.md)를 참고하세요.
+
+`scripts/build.ps1`은 공식 파일을 건드리지 않고 고유한 `build/unsigned` 빌드와 출처 정보를 만듭니다. 변경을 커밋하고 다시 빌드한 뒤 사용자 서명 세션에서 `scripts/sign.ps1 -BuildRoot <표시된 빌드 폴더> -CertificateThumbprint <서명 인증서 지문>`을 실행합니다. 앱 서명 후 `App06_Stepwise_Setup_v<version>.exe` 설치 파일 한 개와 `build-manifest.v<version>.json`, `SHA256SUMS.v<version>.txt`를 검증합니다. 설치 별칭·포터블 ZIP은 생성하지 않습니다. 버전별 장부를 사용해 기존 generic 장부를 보존합니다. GitHub 게시는 별도 `-Publish`와 같은 커밋을 가리키는 기존 원격 태그가 필요하며, 기존 자산을 검증한 후 누락분만 올립니다. 현재 [릴리스 체크리스트](RELEASE_CHECKLIST.md)를 참고하세요.

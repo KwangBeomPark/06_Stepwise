@@ -1,0 +1,15 @@
+{
+  "appId": "App06_Stepwise",
+  "displayName": "Stepwise",
+  "installFolder": "Stepwise",
+  "executableNames": [
+    "Stepwise.exe"
+  ],
+  "optionalDataFolders": [
+    "results"
+  ],
+  "externalData": [
+    "Custom macro library and results folders",
+    "Source Excel/CSV files and external reference images"
+  ]
+}

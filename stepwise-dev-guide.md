@@ -298,7 +298,8 @@ stepwise/
 │  └─ dummy_erp.py              # E2E 테스트용 가짜 입력 폼 앱
 ├─ installer/
 │  ├─ stepwise.spec             # PyInstaller
-│  └─ stepwise.iss              # Inno Setup
+│  ├─ setup.iss                 # Canonical Inno Setup definition
+│  └─ stepwise.iss              # Compatibility include wrapper
 └─ docs/
 ```
 
@@ -1132,7 +1133,7 @@ Test match는 임계값 미달이어도 최고 일치율과 위치를 보여줘�
 
 ### M6. 패키징과 설치 파일
 
-**산출물**: `installer/stepwise.spec`, `installer/stepwise.iss`, 빌드 스크립트, 설치/제거 테스트 결과
+**산출물**: `installer/stepwise.spec`, `installer/setup.iss` (기존 `stepwise.iss`는 호환 wrapper), 빌드 스크립트, 설치/제거 테스트 결과
 
 **범위**: 섹션 14 전체
 

@@ -49,6 +49,7 @@ class PreflightDialog(QDialog):
         initial_speed: SpeedMode = SpeedMode.NORMAL,
         suggested_start_row: int | None = None,
         parent: QWidget | None = None,
+        results_dir: str = "results",
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle(f'Ready to run "{macro.name}"')
@@ -92,6 +93,7 @@ class PreflightDialog(QDialog):
             row_numbers=row_numbers,
             package_dir=package_dir,
             data_file_path=data_file_path,
+            results_dir=results_dir,
         )
         self._populate_issues()
 
