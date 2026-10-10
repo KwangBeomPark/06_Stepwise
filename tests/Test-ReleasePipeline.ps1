@@ -28,29 +28,85 @@ function New-Stage([string]$Name) {
     [IO.File]::WriteAllLines((Join-Path $stage 'SHA256SUMS.v9.9.9.txt'), @($artifacts | ForEach-Object { "$($_.sha256)  $($_.name)" }))
     return $stage
 }
+function Reset-RemoteFixture {
+    $script:remoteDraft = $true
+    $script:remoteExists = $true
+    $script:remotePre = $false
+    $script:remoteState = 'uploaded'
+    $script:remoteCommit = 'fixture-commit'
+    $script:remoteOrigin = 'https://github.com/KwangBeomPark/06_Stepwise.git'
+    $script:remoteFiles = @{}
+    $script:uploaded = @()
+    $script:edits = 0
+    $script:creates = 0
+    $script:failUpload = $false
+    $script:corruptUpload = $false
+    $script:omitDraft = $false
+    $script:omitState = $false
+    $script:omitPublished = $false
+}
+function git {
+    if (($args -join ' ') -ne 'remote get-url origin') { throw 'Unexpected Git operation in fixture.' }
+    $global:LASTEXITCODE = 0
+    return $script:remoteOrigin
+}
+Reset-RemoteFixture
 function gh {
     $global:LASTEXITCODE = 0
+    if ($args[0] -eq 'api') {
+        if ($args[1] -notlike 'repos/KwangBeomPark/06_Stepwise/*') { throw 'API repository was not pinned.' }
+    } else {
+        $repoIdx = [Array]::IndexOf($args, '--repo')
+        if ($repoIdx -lt 0 -or $args[$repoIdx + 1] -cne 'KwangBeomPark/06_Stepwise') { throw 'Release repository was not pinned.' }
+    }
     if ($args[0] -eq 'api') {
         if ($args[1] -like '*/git/ref/tags/*') {
             return (@{ object=@{ type='commit'; sha=$script:remoteCommit } } | ConvertTo-Json -Compress)
         }
-        return ('[[{"tag_name":"v9.9.9","assets":[' + (($script:remoteFiles.Keys | ForEach-Object { '{"name":"' + $_ + '"}' }) -join ',') + ']}]]')
+        if (-not $script:remoteExists -or ($script:omitPublished -and -not $script:remoteDraft)) { return '[[]]' }
+        $assets = @($script:remoteFiles.Keys | ForEach-Object {
+            $asset = [ordered]@{ name=$_ }
+            if (-not $script:omitState) { $asset.state=$script:remoteState }
+            [pscustomobject]$asset
+        })
+        $release = [ordered]@{ tag_name='v9.9.9'; prerelease=$script:remotePre; assets=$assets }
+        if (-not $script:omitDraft) { $release.draft=$script:remoteDraft }
+        return ('[[' + ($release | ConvertTo-Json -Depth 5 -Compress) + ']]')
     }
     if ($args[0] -eq 'release' -and $args[1] -eq 'download') {
-        $name = $args[4]
-        $directory = $args[6]
-        [IO.File]::WriteAllText((Join-Path $directory $name),$script:remoteFiles[$name])
+        $patternIdx = [Array]::IndexOf($args, '--pattern')
+        $name = if ($patternIdx -ge 0) { $args[$patternIdx + 1] } else { $args[4] }
+        $dirIdx = [Array]::IndexOf($args, '--dir')
+        $directory = if ($dirIdx -ge 0) { $args[$dirIdx + 1] } else { $args[6] }
+        [IO.File]::WriteAllText((Join-Path $directory $name), $script:remoteFiles[$name])
         return
     }
-    if ($args[0] -eq 'release' -and $args[1] -eq 'upload') {
-        foreach ($path in $args[3..($args.Count-1)]) {
+    if ($args[0] -eq 'release' -and ($args[1] -eq 'create' -or $args[1] -eq 'upload')) {
+        if ($args[1] -eq 'create') {
+            if ($args -notcontains '--draft') { throw 'New release was not created as a draft.' }
+            $script:remoteDraft = $true
+            $script:remoteExists = $true
+            $script:creates++
+        }
+        if ($script:failUpload) { $global:LASTEXITCODE=1; return }
+        for ($i = 3; $i -lt $args.Count; $i++) {
+            if ($args[$i].StartsWith('--')) { break }
+            $path = $args[$i]
             $name = Split-Path -Leaf $path
             $script:uploaded += $name
             $script:remoteFiles[$name] = [IO.File]::ReadAllText($path)
+            if ($script:corruptUpload) { $script:remoteFiles[$name] += 'corrupted upload' }
         }
         return
     }
-    throw 'Unexpected GitHub operation in fixture.'
+    if ($args[0] -eq 'release' -and $args[1] -eq 'edit') {
+        if ($args -contains '--draft=false') {
+            $script:edits++
+            $script:remoteDraft = $false
+        }
+        return
+    }
+    throw "Unexpected GitHub operation in fixture: $($args -join ' ')"
 }
 try {
     $bundle = Join-Path $fixture 'bundle'
@@ -128,19 +184,64 @@ try {
     } 'Artifact mutation during promotion accepted.'
     Assert-BundleInventory $mutableRelease $beforeMutation
     $script:checks++
-    $script:remoteCommit = 'fixture-commit'
-    $script:remoteFiles = @{ 'old-version.exe'='different remote content' }
-    $script:uploaded = @()
-    $remoteNames = @('old-version.exe','build-manifest.json')
-    Assert-Fails { Publish-GitHubRelease $release $remoteNames 'v9.9.9' 'fixture-commit' (Join-Path $fixture 'remote-mismatch') } 'Remote mismatch accepted.'
-    Assert-True ($script:uploaded.Count -eq 0) 'Uploaded before all remote comparisons completed.'
-    $script:remoteFiles['old-version.exe'] = 'old official'
-    Publish-GitHubRelease $release $remoteNames 'v9.9.9' 'fixture-commit' (Join-Path $fixture 'remote-match')
-    Assert-True (($script:uploaded -join ',') -eq 'build-manifest.json') 'Matching existing asset was reuploaded.'
-    $script:uploaded = @()
-    $script:remoteCommit = 'other-commit'
-    Assert-Fails { Publish-GitHubRelease $release $remoteNames 'v9.9.9' 'fixture-commit' (Join-Path $fixture 'remote-wrong-tag') } 'Wrong remote tag commit accepted.'
-    Assert-True ($script:uploaded.Count -eq 0) 'Uploaded to wrong tag commit.'
+    $remoteRoot = New-Stage 'remote-source'
+    $remoteNames = @(Assert-ReleaseArtifacts $remoteRoot '9.9.9' 'fixture-commit' 'test-thumbprint')
+    Reset-RemoteFixture
+    $script:remoteFiles[$remoteNames[0]] = 'different remote content'
+    Assert-Fails { Publish-GitHubRelease $remoteRoot $remoteNames 'v9.9.9' 'fixture-commit' (Join-Path $fixture 'remote-mismatch') } 'Remote mismatch accepted.'
+    Assert-True ($script:uploaded.Count -eq 0 -and $script:edits -eq 0) 'Mutated release before remote comparisons completed.'
+    $script:remoteFiles[$remoteNames[0]] = [IO.File]::ReadAllText((Join-Path $remoteRoot $remoteNames[0]))
+    Publish-GitHubRelease $remoteRoot $remoteNames 'v9.9.9' 'fixture-commit' (Join-Path $fixture 'remote-match')
+    Assert-True (($script:uploaded -join ',') -eq ($remoteNames[1..2] -join ',')) 'Matching existing installer was reuploaded.'
+    Assert-True ($script:edits -eq 1 -and -not $script:remoteDraft -and $script:remoteFiles.Count -eq 3) 'Verified draft was not published with exactly three assets.'
+    foreach ($badCase in @('extra','pending','missing-state','missing-draft','string-draft','public','prerelease','origin','tag-commit')) {
+        Reset-RemoteFixture
+        $script:remoteFiles[$remoteNames[0]] = [IO.File]::ReadAllText((Join-Path $remoteRoot $remoteNames[0]))
+        switch ($badCase) {
+            'extra' { $script:remoteFiles['unexpected.zip']='extra' }
+            'pending' { $script:remoteState='pending' }
+            'missing-state' { $script:omitState=$true }
+            'missing-draft' { $script:omitDraft=$true }
+            'string-draft' { $script:remoteDraft='false' }
+            'public' { $script:remoteDraft=$false }
+            'prerelease' { $script:remotePre=$true }
+            'origin' { $script:remoteOrigin='https://github.com/KwangBeomPark/other.git' }
+            'tag-commit' { $script:remoteCommit='other-commit' }
+        }
+        Assert-Fails { Publish-GitHubRelease $remoteRoot $remoteNames 'v9.9.9' 'fixture-commit' (Join-Path $fixture "remote-$badCase") } "Bad remote state accepted: $badCase"
+        Assert-True ($script:uploaded.Count -eq 0 -and $script:edits -eq 0 -and $script:creates -eq 0) "Remote mutation before rejection: $badCase"
+    }
+    foreach ($badCase in @('two-files','duplicate','wrong-version','wrong-name')) {
+        Reset-RemoteFixture
+        $badNames = @($remoteNames)
+        $tag = 'v9.9.9'
+        switch ($badCase) {
+            'two-files' { $badNames=@($remoteNames[0..1]) }
+            'duplicate' { $badNames=@($remoteNames[0],$remoteNames[1],$remoteNames[1]) }
+            'wrong-version' { $tag='v9.9.8' }
+            'wrong-name' { $badNames[0]='old-version.exe' }
+        }
+        Assert-Fails { Publish-GitHubRelease $remoteRoot $badNames $tag 'fixture-commit' (Join-Path $fixture "remote-$badCase") } "Bad local contract accepted: $badCase"
+        Assert-True ($script:uploaded.Count -eq 0 -and $script:edits -eq 0 -and $script:creates -eq 0) "Remote mutation for bad local contract: $badCase"
+    }
+    Reset-RemoteFixture
+    $script:remoteExists=$false
+    Publish-GitHubRelease $remoteRoot $remoteNames 'v9.9.9' 'fixture-commit' (Join-Path $fixture 'remote-fresh')
+    Assert-True ($script:creates -eq 1 -and $script:edits -eq 1 -and -not $script:remoteDraft -and $script:uploaded.Count -eq 3) 'Fresh release did not follow verified draft-first publication.'
+    foreach ($badCase in @('create-failure','upload-failure','corrupt-upload','pending-after-upload')) {
+        Reset-RemoteFixture
+        if ($badCase -ne 'upload-failure') { $script:remoteExists=$false }
+        if ($badCase -like '*failure') { $script:failUpload=$true }
+        if ($badCase -eq 'corrupt-upload') { $script:corruptUpload=$true }
+        if ($badCase -eq 'pending-after-upload') { $script:remoteState='pending' }
+        Assert-Fails { Publish-GitHubRelease $remoteRoot $remoteNames 'v9.9.9' 'fixture-commit' (Join-Path $fixture "remote-$badCase") } "Bad upload accepted: $badCase"
+        Assert-True ($script:remoteDraft -and $script:edits -eq 0) "Failed upload or verification publicly exposed a draft: $badCase"
+    }
+    Reset-RemoteFixture
+    $script:omitPublished=$true
+    Assert-Fails { Publish-GitHubRelease $remoteRoot $remoteNames 'v9.9.9' 'fixture-commit' (Join-Path $fixture 'remote-missing-published') } 'Missing published release was accepted.'
+    Assert-True ($script:edits -eq 1) 'Missing postpublication fixture did not reach state verification.'
+    Assert-Fails { Assert-GitHubReleaseIdentity ([pscustomobject]@{tag_name='v9.9.8'; draft=$true; prerelease=$false; assets=@()}) 'v9.9.9' $true } 'Wrong remote tag identity accepted.'
     Write-Output "PASS: $script:checks release failure/safety assertions; signatures mocked, no real signing/publication."
 } finally {
     $absolute = [IO.Path]::GetFullPath($fixture)

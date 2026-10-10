@@ -1,6 +1,6 @@
-*다른 언어로 읽기: [한국어](README.ko.md), [English](README.md) | 📖 **사용자 매뉴얼**: [한국어 매뉴얼](docs/manual/USER_MANUAL.ko.md) · [English Manual](docs/manual/USER_MANUAL.md) · [Instrukcja Polski](docs/manual/USER_MANUAL.pl.md)*
+﻿*다른 언어로 읽기: [한국어](README.ko.md), [English](README.md), [Polski](README.pl.md) | 📖 **사용자 설명서**: [한국어 설명서](docs/manual/USER_MANUAL.ko.md) • [English Manual](docs/manual/USER_MANUAL.md) • [Instrukcja Polski](docs/manual/USER_MANUAL.pl.md)*
 
-# <img src="assets/icons/stepwise.png" width="36" height="36" valign="middle" alt="Stepwise Icon"> Stepwise (스텝와이즈)
+# 🛡️ Stepwise: 테이블 데이터 기반 단순 반복 전표·데이터 입력 자동화 도구
 
 <p align="center">
   <img src="assets/images/stepwise-hero.png" width="950" alt="Stepwise - Windows 데이터 기반 매크로 자동화 도구">

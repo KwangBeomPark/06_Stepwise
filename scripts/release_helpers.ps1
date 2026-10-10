@@ -128,23 +128,56 @@ function Publish-LocalRelease([string]$Stage, [string]$ReleaseRoot, [string[]]$N
         throw
     }
 }
+function Assert-GitHubReleaseIdentity($Release, [string]$Tag, [bool]$Draft) {
+    foreach ($property in @('tag_name', 'draft', 'prerelease', 'assets')) {
+        if (-not $Release.PSObject.Properties[$property]) { throw "Remote release is missing $property." }
+    }
+    if ($Release.tag_name -cne $Tag -or $Release.draft -isnot [bool] -or $Release.draft -ne $Draft -or
+        $Release.prerelease -isnot [bool] -or $Release.prerelease -ne $false) {
+        throw 'Remote release tag/draft/prerelease identity mismatch.'
+    }
+}
+
 function Publish-GitHubRelease([string]$ReleaseRoot, [string[]]$Names, [string]$Tag, [string]$Commit, [string]$DownloadRoot) {
     # Never create/move tags, delete releases/assets, or overwrite an existing asset.
-    $tagRef = & gh api "repos/{owner}/{repo}/git/ref/tags/$Tag"
+    if ($Tag -notmatch '^v(\d+\.\d+\.\d+)$') { throw 'A canonical semantic-version release tag is required.' }
+    $version = $Matches[1]
+    $expectedNames = @("App06_Stepwise_Setup_v$version.exe", "build-manifest.v$version.json", "SHA256SUMS.v$version.txt")
+    if ($Names.Count -ne 3 -or @($Names | Sort-Object -Unique).Count -ne 3 -or
+        @($Names | Where-Object { $_ -cnotin $expectedNames }).Count) {
+        throw 'Publication requires exactly the canonical installer, manifest, and checksum file for the tag.'
+    }
+    foreach ($name in $Names) {
+        if (-not (Test-Path -LiteralPath (Join-Path $ReleaseRoot $name) -PathType Leaf)) { throw "Missing local release asset: $name" }
+    }
+    $repo = 'KwangBeomPark/06_Stepwise'
+    $originOutput = & git remote get-url origin
+    if ($LASTEXITCODE -ne 0 -or -not $originOutput) { throw 'Cannot determine origin repository; no remote mutations were attempted.' }
+    $originUrl = ([string]$originOutput).Trim()
+    if ($LASTEXITCODE -ne 0 -or $originUrl -cnotin @("https://github.com/$repo.git", "git@github.com:$repo.git")) {
+        throw 'Unexpected origin repository; no remote mutations were attempted.'
+    }
+    $tagRef = & gh api "repos/$repo/git/ref/tags/$Tag"
     if ($LASTEXITCODE -ne 0) { throw 'An existing remote release tag is required.' }
     $reference = $tagRef | ConvertFrom-Json
     $object = $reference.object
     while ($object.type -eq 'tag') {
-        $tagObject = & gh api "repos/{owner}/{repo}/git/tags/$($object.sha)"
+        $tagObject = & gh api "repos/$repo/git/tags/$($object.sha)"
         if ($LASTEXITCODE -ne 0) { throw 'Cannot resolve annotated remote release tag.' }
         $object = ($tagObject | ConvertFrom-Json).object
     }
     if ($object.type -ne 'commit' -or $object.sha -ne $Commit) { throw 'Remote tag does not point to the verified source commit.' }
-    $allReleases = & gh api 'repos/{owner}/{repo}/releases?per_page=100' --paginate --slurp
+    $allReleases = & gh api "repos/$repo/releases?per_page=100" --paginate --slurp
     if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect remote releases; no publication attempted.' }
     $pages = $allReleases | ConvertFrom-Json
     $existing = @($pages | ForEach-Object { $_ } | Where-Object { $_.tag_name -eq $Tag })
     if ($existing.Count -gt 1) { throw 'Ambiguous remote release.' }
+    if ($existing.Count) {
+        Assert-GitHubReleaseIdentity $existing[0] $Tag $true
+        foreach ($asset in @($existing[0].assets)) {
+            if ($asset.name -cnotin $Names) { throw "Unexpected remote release asset: $($asset.name). Existing files were preserved." }
+        }
+    }
     $missing = @()
     foreach ($name in $Names) {
         if ([IO.Path]::GetFileName($name) -cne $name) { throw 'Publication accepts leaf names only.' }
@@ -152,25 +185,63 @@ function Publish-GitHubRelease([string]$ReleaseRoot, [string[]]$Names, [string]$
         if ($existing.Count) { $remoteAsset = @($existing[0].assets | Where-Object { $_.name -ceq $name }) }
         if ($remoteAsset.Count -gt 1) { throw 'Duplicate remote asset name.' }
         if ($remoteAsset.Count) {
+            $stateVal = if ($remoteAsset[0].PSObject.Properties['state']) { [string]$remoteAsset[0].state } else { '' }
+            if ($stateVal -ne 'uploaded') { throw "Remote asset is not fully uploaded: $name" }
             $download = Join-Path $DownloadRoot ('before-' + [guid]::NewGuid().ToString('N'))
             [IO.Directory]::CreateDirectory($download) | Out-Null
-            & gh release download $Tag --pattern $name --dir $download
+            & gh release download $Tag --repo $repo --pattern $name --dir $download
             if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath (Join-Path $download $name))) { throw 'Cannot verify existing remote asset.' }
             if ((Get-FileHash -LiteralPath (Join-Path $download $name)).Hash -ne
                 (Get-FileHash -LiteralPath (Join-Path $ReleaseRoot $name)).Hash) { throw "Existing remote asset differs; use a new version: $name" }
         } else { $missing += Join-Path $ReleaseRoot $name }
     }
     if (-not $existing.Count) {
-        & gh release create $Tag @missing --verify-tag --title "Stepwise $Tag" --generate-notes
-        if ($LASTEXITCODE -ne 0) { throw 'Release creation failed. Retry only with this verified set.' }
+        & gh release create $Tag @missing --repo $repo --verify-tag --draft --title "Stepwise $Tag" --generate-notes
+        if ($LASTEXITCODE -ne 0) { throw 'Draft release creation failed. Retry only with this verified set.' }
     } elseif ($missing.Count) {
-        & gh release upload $Tag @missing
+        & gh release upload $Tag @missing --repo $repo
         if ($LASTEXITCODE -ne 0) { throw 'Missing-asset upload failed. Existing assets were not overwritten.' }
+    }
+    $afterCheckReleases = & gh api "repos/$repo/releases?per_page=100" --paginate --slurp
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect draft release after upload; draft preserved for inspection.' }
+    $pagesAfter = $afterCheckReleases | ConvertFrom-Json
+    $draftReleases = @($pagesAfter | ForEach-Object { $_ } | Where-Object { $_.tag_name -eq $Tag })
+    if ($draftReleases.Count -ne 1) { throw 'Cannot retrieve draft release for verification.' }
+    $currentDraft = $draftReleases[0]
+    Assert-GitHubReleaseIdentity $currentDraft $Tag $true
+    if (@($currentDraft.assets).Count -ne $Names.Count) { throw "Draft asset count mismatch: expected $($Names.Count), got $(@($currentDraft.assets).Count)" }
+    foreach ($asset in @($currentDraft.assets)) {
+        if ($asset.name -cnotin $Names) { throw "Unexpected remote release asset in draft: $($asset.name)." }
+        $assetState = if ($asset.PSObject.Properties['state']) { [string]$asset.state } else { '' }
+        if ($assetState -ne 'uploaded') { throw "Draft asset upload incomplete: $($asset.name)." }
+    }
+    foreach ($name in $Names) {
+        $download = Join-Path $DownloadRoot ('draft-' + [guid]::NewGuid().ToString('N'))
+        [IO.Directory]::CreateDirectory($download) | Out-Null
+        & gh release download $Tag --repo $repo --pattern $name --dir $download
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath (Join-Path $download $name)) -or
+            (Get-FileHash -LiteralPath (Join-Path $download $name)).Hash -ne (Get-FileHash -LiteralPath (Join-Path $ReleaseRoot $name)).Hash) {
+            throw "Draft asset verification failed: $name. Preserve draft for inspection."
+        }
+    }
+    & gh release edit $Tag --repo $repo --draft=false --latest
+    if ($LASTEXITCODE -ne 0) { throw 'Publishing verified draft failed. Preserve draft for inspection.' }
+    $afterPubReleases = & gh api "repos/$repo/releases?per_page=100" --paginate --slurp
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect published release after publication.' }
+    $pagesPub = $afterPubReleases | ConvertFrom-Json
+    $pubReleases = @($pagesPub | ForEach-Object { $_ } | Where-Object { $_.tag_name -eq $Tag })
+    if ($pubReleases.Count -ne 1) { throw 'Published release count check failed.' }
+    Assert-GitHubReleaseIdentity $pubReleases[0] $Tag $false
+    if (@($pubReleases[0].assets).Count -ne $Names.Count) { throw 'Published asset count mismatch.' }
+    foreach ($asset in @($pubReleases[0].assets)) {
+        if ($asset.name -cnotin $Names) { throw "Unexpected remote release asset in published release: $($asset.name)." }
+        $pubAssetState = if ($asset.PSObject.Properties['state']) { [string]$asset.state } else { '' }
+        if ($pubAssetState -ne 'uploaded') { throw "Published asset state incomplete: $($asset.name)." }
     }
     foreach ($name in $Names) {
         $download = Join-Path $DownloadRoot ('after-' + [guid]::NewGuid().ToString('N'))
         [IO.Directory]::CreateDirectory($download) | Out-Null
-        & gh release download $Tag --pattern $name --dir $download
+        & gh release download $Tag --repo $repo --pattern $name --dir $download
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath (Join-Path $download $name)) -or
             (Get-FileHash -LiteralPath (Join-Path $download $name)).Hash -ne (Get-FileHash -LiteralPath (Join-Path $ReleaseRoot $name)).Hash) {
             throw "Published asset verification failed: $name. Existing remote files were retained."
