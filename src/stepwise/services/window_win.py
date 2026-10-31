@@ -12,6 +12,7 @@ import time
 from ctypes import wintypes
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
+dwmapi = getattr(ctypes.windll, "dwmapi", None)
 
 # Win32 Constants
 SW_HIDE = 0
@@ -30,6 +31,7 @@ SWP_SHOWWINDOW = 0x0040
 GW_OWNER = 4
 GWL_STYLE = -16
 WS_CHILD = 0x40000000
+DWMWA_CLOAKED = 14
 
 # Explicit ctypes function prototypes for 64-bit safe interop
 WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
@@ -98,9 +100,28 @@ def get_window_title(hwnd: int) -> str:
     return buf.value
 
 
+def is_window_cloaked(hwnd: int) -> bool:
+    """Return True if window is DWM-cloaked (e.g. on another virtual desktop or suspended UWP)."""
+    if not dwmapi or not hasattr(dwmapi, "DwmGetWindowAttribute"):
+        return False
+    try:
+        cloaked = ctypes.c_int(0)
+        res = dwmapi.DwmGetWindowAttribute(
+            wintypes.HWND(hwnd),
+            wintypes.DWORD(DWMWA_CLOAKED),
+            ctypes.byref(cloaked),
+            ctypes.sizeof(cloaked),
+        )
+        return res == 0 and cloaked.value != 0
+    except Exception:
+        return False
+
+
 def is_alt_tab_window(hwnd: int, exclude_pid: int | None = None) -> bool:
     """Check if window is a valid, visible top-level interactive application window."""
     if not user32.IsWindowVisible(hwnd):
+        return False
+    if is_window_cloaked(hwnd):
         return False
 
     # Filter out current process's own windows (e.g. Stepwise main window)

@@ -71,3 +71,19 @@ def _validate_items(items: list[Any], in_group: bool = False) -> None:
                     raise MacroSyntaxError(
                         f"Image action '{act_type}' cannot have separate Guard or Verify images."
                     )
+            if act_type == "click":
+                t_mode = item.get("target_mode", "coordinates")
+                if t_mode not in ("coordinates", "selector"):
+                    raise MacroSyntaxError(
+                        f"Invalid target_mode '{t_mode}' at item {idx}."
+                    )
+                c_method = item.get("click_method", "hardware")
+                if c_method not in ("hardware", "simulate"):
+                    raise MacroSyntaxError(
+                        f"Invalid click_method '{c_method}' at item {idx}."
+                    )
+                sel = item.get("selector")
+                if sel is not None and not isinstance(sel, dict):
+                    raise MacroSyntaxError(
+                        f"Selector at item {idx} must be a JSON object."
+                    )

@@ -13,7 +13,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import QTimer, Signal
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -34,6 +35,7 @@ from PySide6.QtWidgets import (
 from stepwise.core.models import Macro
 from stepwise.engine.preflight import run_preflight_checks
 from stepwise.engine.timing import SpeedMode
+from stepwise.ui.theme import get_theme_tokens
 
 
 class PreflightDialog(QDialog):
@@ -144,9 +146,13 @@ class PreflightDialog(QDialog):
 
         main_layout.addWidget(opts_box)
 
+        t = get_theme_tokens()
+
         # 4. Countdown Banner
         self.lbl_countdown = QLabel("Click [Start] to begin execution.")
-        self.lbl_countdown.setStyleSheet("color: #2563eb; font-weight: bold; font-size: 13px;")
+        self.lbl_countdown.setStyleSheet(
+            f"color: {t['accent_primary']}; font-weight: bold; font-size: 13px;"
+        )
         main_layout.addWidget(self.lbl_countdown)
 
         # 5. Buttons
@@ -156,7 +162,7 @@ class PreflightDialog(QDialog):
 
         self.btn_start = QPushButton("Start Run")
         self.btn_start.setStyleSheet(
-            "background-color: #16a34a; color: white; font-weight: bold; padding: 8px 20px;"
+            f"background-color: {t['status_ok']}; color: white; font-weight: bold; padding: 8px 20px;"
         )
         self.btn_start.clicked.connect(self._start_countdown)
 
@@ -169,7 +175,7 @@ class PreflightDialog(QDialog):
             self.btn_start.setEnabled(False)
             self.btn_run_1_row.setEnabled(False)
             self.lbl_countdown.setText("⚠ Please resolve blocking errors above before running.")
-            self.lbl_countdown.setStyleSheet("color: #dc2626; font-weight: bold;")
+            self.lbl_countdown.setStyleSheet(f"color: {t['status_fail']}; font-weight: bold;")
 
         btn_layout.addWidget(self.btn_run_1_row)
         btn_layout.addStretch()
@@ -178,9 +184,10 @@ class PreflightDialog(QDialog):
         main_layout.addLayout(btn_layout)
 
     def _populate_issues(self) -> None:
+        t = get_theme_tokens()
         if not self.issues:
             it = QListWidgetItem("✅ All pre-flight checks passed.")
-            it.setForeground(Qt.darkGreen)
+            it.setForeground(QColor(t["status_ok"]))
             self.list_issues.addItem(it)
             return
 
@@ -191,9 +198,9 @@ class PreflightDialog(QDialog):
                 text += f"\n   ↳ {issue.details}"
             item = QListWidgetItem(text)
             if issue.is_error:
-                item.setForeground(Qt.red)
+                item.setForeground(QColor(t["status_fail"]))
             else:
-                item.setForeground(Qt.darkYellow)
+                item.setForeground(QColor(t["status_warn"]))
             self.list_issues.addItem(item)
 
     def _start_countdown(self) -> None:

@@ -153,13 +153,81 @@ def execute_action(
         y = int(_get_val(action, "y", 0))
         btn = _get_val(action, "button", "left")
         clicks = int(_get_val(action, "clicks", 1))
-        if not click_at(x, y, button=btn, clicks=clicks):
-            raise StepFailure(
-                message="The mouse could not reach or click the target. Check the screen coordinates and application permissions.",
-                step_id=step_id,
-                step_label=step_label,
-                row_number=row_number,
+        selector = _get_val(action, "selector")
+        target_mode = str(
+            _get_val(action, "target_mode") or ("selector" if selector else "coordinates")
+        )
+        click_method = str(_get_val(action, "click_method", "hardware") or "hardware")
+
+        target_hwnd = 0
+        use_bm_click = False
+        if target_mode == "selector":
+            if not selector or not isinstance(selector, Mapping):
+                raise StepFailure(
+                    message="Target mode is UI Selector, but no valid selector is configured.",
+                    step_id=step_id,
+                    step_label=step_label,
+                    row_number=row_number,
+                )
+            from stepwise.services.uia_win import resolve_selector
+
+            try:
+                elem = resolve_selector(dict(selector), row_data=row_data or {}, exclude_self=True)
+            except Exception as e:
+                raise StepFailure(
+                    message=f"UI Selector resolution failed: {e}",
+                    step_id=step_id,
+                    step_label=step_label,
+                    row_number=row_number,
+                ) from e
+            x, y = elem.target_point()
+            target_hwnd = elem.hwnd
+            use_bm_click = elem.control_type == "Button" and elem.hwnd != elem.root_hwnd
+
+        if click_method == "simulate":
+            from stepwise.services.uia_win import (
+                get_class_name,
+                infer_control_type,
+                simulate_click_at_hwnd,
+                user32,
+                wintypes,
             )
+
+            if not target_hwnd:
+                pt = wintypes.POINT(x, y)
+                target_hwnd = int(user32.WindowFromPoint(pt) or 0)
+                if not target_hwnd:
+                    raise StepFailure(
+                        message=f"No target window found at ({x}, {y}) for Simulate Click.",
+                        step_id=step_id,
+                        step_label=step_label,
+                        row_number=row_number,
+                    )
+                use_bm_click = infer_control_type(target_hwnd, get_class_name(target_hwnd)) == "Button"
+
+            ok_sim, sim_err = simulate_click_at_hwnd(
+                hwnd=target_hwnd,
+                screen_x=x,
+                screen_y=y,
+                button=btn,
+                clicks=clicks,
+                use_bm_click=use_bm_click,
+            )
+            if not ok_sim:
+                raise StepFailure(
+                    message=f"Simulate Click failed: {sim_err}",
+                    step_id=step_id,
+                    step_label=step_label,
+                    row_number=row_number,
+                )
+        else:
+            if not click_at(x, y, button=btn, clicks=clicks):
+                raise StepFailure(
+                    message="The mouse could not reach or click the target. Check the screen coordinates and application permissions.",
+                    step_id=step_id,
+                    step_label=step_label,
+                    row_number=row_number,
+                )
 
     elif act_type == "click_image":
         img_rel = _get_val(action, "image")

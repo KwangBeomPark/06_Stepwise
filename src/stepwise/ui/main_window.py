@@ -58,9 +58,11 @@ from stepwise.ui.preflight_dialog import PreflightDialog
 from stepwise.ui.properties_panel import PropertiesPanel
 from stepwise.ui.run_panel import FloatingRunPanel
 from stepwise.ui.run_summary import RunSummaryDialog
-from stepwise.ui.screen_crosshair import ScreenCrosshairOverlay
+from stepwise.ui.scheduler_dialog import SchedulerDialog
+from stepwise.ui.screen_crosshair import ElementHighlightOverlay, ScreenCrosshairOverlay
 from stepwise.ui.settings_dialog import SettingsDialog
-from stepwise.ui.strings import Strings
+from stepwise.ui.strings import Strings, apply_language, get_current_language
+from stepwise.ui.theme import apply_theme, get_current_theme, get_theme_tokens
 
 
 class RunnerBridge(QObject):
@@ -117,6 +119,7 @@ class MainWindow(QMainWindow):
         self._pending_summary: RunSummary | None = None
         self._retained_summaries: list[RunSummary] = []
         self._close_requested = False
+        self._last_run_opts: dict[str, Any] = {}
 
         self._bridge = RunnerBridge()
         self._bridge.event.connect(self._on_runner_event, Qt.QueuedConnection)
@@ -177,12 +180,32 @@ class MainWindow(QMainWindow):
 
         self.toolbar.addSeparator()
 
-        self.btn_save = QPushButton("💾 Save")
+        self.btn_save = QPushButton(f"💾 {Strings.SAVE_MACRO}")
         self.btn_save.setToolTip(Strings.Tooltips.SAVE_MACRO)
         self.btn_save.clicked.connect(self.save_current_macro)
         self.toolbar.addWidget(self.btn_save)
 
+        self.btn_schedule = QPushButton(f"⏰ {Strings.SCHEDULE}")
+        self.btn_schedule.setObjectName("btn_schedule")
+        self.btn_schedule.setToolTip(Strings.Tooltips.SCHEDULE)
+        self.btn_schedule.clicked.connect(self._open_scheduler)
+        self.toolbar.addWidget(self.btn_schedule)
+
         self.toolbar.addSeparator()
+
+        self.btn_theme = QPushButton(
+            Strings.THEME_DARK if get_current_theme() == "dark" else Strings.THEME_LIGHT
+        )
+        self.btn_theme.setObjectName("btn_theme")
+        self.btn_theme.clicked.connect(self._toggle_theme)
+        self.toolbar.addWidget(self.btn_theme)
+
+        self.btn_lang = QPushButton(
+            Strings.LANG_KO if get_current_language() == "ko" else Strings.LANG_EN
+        )
+        self.btn_lang.setObjectName("btn_lang")
+        self.btn_lang.clicked.connect(self._toggle_language)
+        self.toolbar.addWidget(self.btn_lang)
 
         self.btn_settings = QPushButton(f"⚙ {Strings.SETTINGS}")
         self.btn_settings.setToolTip(Strings.Tooltips.SETTINGS)
@@ -222,35 +245,36 @@ class MainWindow(QMainWindow):
         action_btn_layout = QHBoxLayout()
         action_btn_layout.setSpacing(8)
 
-        lbl_add = QLabel("Add Action:")
-        lbl_add.setStyleSheet("font-weight: bold; color: #475569;")
-        action_btn_layout.addWidget(lbl_add)
+        t = get_theme_tokens()
+        self.lbl_add_action = QLabel(Strings.ADD_ACTION_LABEL)
+        self.lbl_add_action.setStyleSheet(f"font-weight: bold; color: {t['text_secondary']};")
+        action_btn_layout.addWidget(self.lbl_add_action)
 
-        self.btn_add_click = QPushButton("👆 + Click")
+        self.btn_add_click = QPushButton(Strings.BTN_ADD_CLICK)
         self.btn_add_click.setToolTip(Strings.Tooltips.ADD_CLICK)
         self.btn_add_click.clicked.connect(lambda: self._add_quick_action("click"))
 
-        self.btn_add_type = QPushButton("⌨ + Type")
+        self.btn_add_type = QPushButton(Strings.BTN_ADD_TYPE)
         self.btn_add_type.setToolTip(Strings.Tooltips.ADD_TYPE)
         self.btn_add_type.clicked.connect(lambda: self._add_quick_action("type_text"))
 
-        self.btn_add_key = QPushButton("↵ + Key")
+        self.btn_add_key = QPushButton(Strings.BTN_ADD_KEY)
         self.btn_add_key.setToolTip(Strings.Tooltips.ADD_KEY)
         self.btn_add_key.clicked.connect(lambda: self._add_quick_action("key"))
 
-        self.btn_add_wait = QPushButton("⏱ + Wait")
+        self.btn_add_wait = QPushButton(Strings.BTN_ADD_WAIT)
         self.btn_add_wait.setToolTip(Strings.Tooltips.ADD_WAIT)
         self.btn_add_wait.clicked.connect(lambda: self._add_quick_action("wait"))
 
-        self.btn_add_win = QPushButton("🪟 + Window")
+        self.btn_add_win = QPushButton(Strings.BTN_ADD_WIN)
         self.btn_add_win.setToolTip(Strings.Tooltips.ADD_WINDOW)
         self.btn_add_win.clicked.connect(lambda: self._add_quick_action("window_set_bounds"))
 
-        self.btn_move_up = QPushButton(f"↑ {Strings.MOVE_UP}")
+        self.btn_move_up = QPushButton(Strings.MOVE_UP)
         self.btn_move_up.setToolTip("Move selected step up within section (Alt+Up)")
         self.btn_move_up.clicked.connect(self._on_move_up_clicked)
 
-        self.btn_move_down = QPushButton(f"↓ {Strings.MOVE_DOWN}")
+        self.btn_move_down = QPushButton(Strings.MOVE_DOWN)
         self.btn_move_down.setToolTip("Move selected step down within section (Alt+Down)")
         self.btn_move_down.clicked.connect(self._on_move_down_clicked)
 
@@ -286,6 +310,8 @@ class MainWindow(QMainWindow):
         self.prop_panel = PropertiesPanel()
         self.prop_panel.property_changed.connect(self._on_property_changed)
         self.prop_panel.request_pick.connect(self._trigger_pick_overlay)
+        self.prop_panel.request_pick_element.connect(self._trigger_element_pick_overlay)
+        self.prop_panel.request_validate_selector.connect(self._validate_and_highlight_selector)
         self.prop_panel.request_capture.connect(self._trigger_capture_overlay)
         self.prop_panel.request_show_crosshair.connect(self._show_screen_crosshair)
         self.prop_panel.request_test_step.connect(self._test_single_action)
@@ -343,17 +369,24 @@ class MainWindow(QMainWindow):
         act_run.triggered.connect(self._on_run_clicked)
         self.addAction(act_run)
 
+        # Ctrl+F8 Pick UI Element
+        act_pick_elem = QAction("Pick UI Element", self)
+        act_pick_elem.setShortcut(QKeySequence("Ctrl+F8"))
+        act_pick_elem.triggered.connect(self._trigger_element_pick_overlay)
+        self.addAction(act_pick_elem)
+
     def _update_status_bar_screen_info(self) -> None:
+        t = get_theme_tokens()
         screen = get_screen_info()
         w, h, scale = screen["width"], screen["height"], screen["scale_percent"]
         rec = self._current_macro.recorded_screen
 
         if rec.width == w and rec.height == h and rec.scale_percent == scale:
             self.lbl_screen_info.setText(f"Screen {w}x{h} @{scale}% ✅")
-            self.lbl_screen_info.setStyleSheet("color: #16a34a; font-weight: 500;")
+            self.lbl_screen_info.setStyleSheet(f"color: {t['status_ok']}; font-weight: 500;")
         else:
             self.lbl_screen_info.setText(f"Screen {w}x{h} @{scale}% ⚠")
-            self.lbl_screen_info.setStyleSheet("color: #dc2626; font-weight: bold;")
+            self.lbl_screen_info.setStyleSheet(f"color: {t['status_fail']}; font-weight: bold;")
 
     def load_macro_file(self, swm_path: str) -> None:
         if self._is_running:
@@ -681,6 +714,53 @@ class MainWindow(QMainWindow):
         self.overlay.coords_picked.connect(_on_picked)
         self.overlay.show()
 
+    def _trigger_element_pick_overlay(self) -> None:
+        act = self.prop_panel._current_action
+        if not act or act.type != "click":
+            return
+
+        def _on_element_picked(selector: dict[str, Any], x: int, y: int) -> None:
+            act.target_mode = "selector"
+            act.selector = selector
+            act.x = x
+            act.y = y
+            self.prop_panel.set_action(act)
+            self.action_tree.rebuild_tree()
+            ctrl = selector.get("control_type") or "Element"
+            name = selector.get("name") or selector.get("automation_id") or ""
+            self.status_bar.showMessage(f"Picked UI Element: [{ctrl}] {name} at ({x}, {y})")
+
+        self.overlay = CaptureOverlay(
+            mode="element", images_dir=os.path.join(self._package_dir, "images")
+        )
+        self.overlay.element_picked.connect(_on_element_picked)
+        self.overlay.show()
+
+    def _validate_and_highlight_selector(self, action: ActionItem) -> None:
+        if not action.selector:
+            QMessageBox.information(
+                self,
+                "UI Selector Validation",
+                Strings.SELECTOR_SUMMARY_EMPTY,
+            )
+            return
+        try:
+            from stepwise.services.uia_win import resolve_selector
+
+            sample_row = self._data_rows[0] if self._data_rows else {}
+            match = resolve_selector(action.selector, row_data=sample_row)
+            label = f"[{match.control_type}] {match.name or match.automation_id or match.class_name}"
+            self._element_highlight_overlay = ElementHighlightOverlay(
+                match.rect, label=label
+            )
+            tx, ty = match.target_point()
+            self.status_bar.showMessage(
+                f"Selector matched uniquely at ({tx}, {ty}): {label} ✅"
+            )
+        except Exception as e:
+            self.status_bar.showMessage(f"Selector validation failed: {e} ❌")
+            QMessageBox.warning(self, "UI Selector Validation", str(e))
+
     def _trigger_capture_overlay(self) -> None:
         act = self.prop_panel._current_action
         if not act:
@@ -712,7 +792,92 @@ class MainWindow(QMainWindow):
             if new_lib and new_lib != self._library_dir:
                 self._library_dir = str(new_lib)
                 self.lib_panel.set_library_dir(str(new_lib))
+            self.retranslate_ui()
             self.status_bar.showMessage("Settings saved.")
+
+    def _toggle_theme(self) -> None:
+        from PySide6.QtWidgets import QApplication
+
+        next_theme = "light" if get_current_theme() == "dark" else "dark"
+        app = QApplication.instance()
+        if app is not None:
+            apply_theme(app, next_theme)
+        self._user_settings["theme"] = next_theme
+        try:
+            save_user_settings(self._user_settings)
+        except OSError:
+            pass
+        self.retranslate_ui()
+
+    def _toggle_language(self) -> None:
+        next_lang = "en" if get_current_language() == "ko" else "ko"
+        apply_language(next_lang)
+        self._user_settings["language"] = next_lang
+        try:
+            save_user_settings(self._user_settings)
+        except OSError:
+            pass
+        self.retranslate_ui()
+
+    def retranslate_ui(self) -> None:
+        """Refresh all UI labels, tooltips, and theme colors across MainWindow and child panels."""
+        t = get_theme_tokens()
+        self.btn_run.setText(f"▶ {Strings.RUN}")
+        self.btn_run.setToolTip(Strings.Tooltips.RUN)
+        self.btn_pause.setText(f"⏸ {Strings.PAUSE}")
+        self.btn_pause.setToolTip(Strings.Tooltips.PAUSE)
+        self.btn_stop.setText(f"■ {Strings.STOP}")
+        self.btn_stop.setToolTip(Strings.Tooltips.STOP)
+        self.btn_save.setText(f"💾 {Strings.SAVE_MACRO}")
+        self.btn_save.setToolTip(Strings.Tooltips.SAVE_MACRO)
+        self.btn_schedule.setText(f"⏰ {Strings.SCHEDULE}")
+        self.btn_schedule.setToolTip(Strings.Tooltips.SCHEDULE)
+        self.btn_theme.setText(
+            Strings.THEME_DARK if get_current_theme() == "dark" else Strings.THEME_LIGHT
+        )
+        self.btn_lang.setText(
+            Strings.LANG_KO if get_current_language() == "ko" else Strings.LANG_EN
+        )
+        self.btn_settings.setText(f"⚙ {Strings.SETTINGS}")
+        self.btn_settings.setToolTip(Strings.Tooltips.SETTINGS)
+
+        self.lbl_add_action.setText(Strings.ADD_ACTION_LABEL)
+        self.lbl_add_action.setStyleSheet(f"font-weight: bold; color: {t['text_secondary']};")
+        self.btn_add_click.setText(Strings.BTN_ADD_CLICK)
+        self.btn_add_click.setToolTip(Strings.Tooltips.ADD_CLICK)
+        self.btn_add_type.setText(Strings.BTN_ADD_TYPE)
+        self.btn_add_type.setToolTip(Strings.Tooltips.ADD_TYPE)
+        self.btn_add_key.setText(Strings.BTN_ADD_KEY)
+        self.btn_add_key.setToolTip(Strings.Tooltips.ADD_KEY)
+        self.btn_add_wait.setText(Strings.BTN_ADD_WAIT)
+        self.btn_add_wait.setToolTip(Strings.Tooltips.ADD_WAIT)
+        self.btn_add_win.setText(Strings.BTN_ADD_WIN)
+        self.btn_add_win.setToolTip(Strings.Tooltips.ADD_WINDOW)
+        self.btn_move_up.setText(Strings.MOVE_UP)
+        self.btn_move_down.setText(Strings.MOVE_DOWN)
+        self.btn_delete.setText(f"🗑 {Strings.DELETE}")
+        self.btn_delete.setToolTip(Strings.Tooltips.DELETE_ACTION)
+
+        self._update_status_bar_screen_info()
+        self.lib_panel.retranslate_ui()
+        self.action_tree.retranslate_ui()
+        self.data_panel.retranslate_ui()
+        self.prop_panel.retranslate_ui()
+
+    def _open_scheduler(self) -> None:
+        if self._is_running:
+            return
+        dlg = SchedulerDialog(
+            macro=self._current_macro,
+            rows_data=self._data_rows,
+            row_numbers=self._data_row_nums,
+            package_dir=self._package_dir,
+            data_file_path=self._data_filepath,
+            results_dir=str(self._user_settings.get("results_dir") or default_results_directory()),
+            parent=self,
+        )
+        if dlg.exec() == SchedulerDialog.Accepted and dlg.confirmed_opts:
+            self._start_execution(dlg.confirmed_opts)
 
     def _on_run_clicked(self) -> None:
         if self._is_running:
@@ -778,6 +943,7 @@ class MainWindow(QMainWindow):
             rows_snapshot = copy.deepcopy(self._data_rows)
             row_nums_snapshot = copy.deepcopy(self._data_row_nums)
             opts = copy.deepcopy(opts)
+            self._last_run_opts = opts
             snapshot = ExecutionSnapshot(
                 macro=macro_snapshot,
                 rows=tuple(rows_snapshot),
@@ -912,9 +1078,25 @@ class MainWindow(QMainWindow):
             return
         self._close_requested = False
         self.showNormal()
+        if (
+            self._last_run_opts.get("scheduled")
+            and self._last_run_opts.get("lock_after")
+            and not (summary and summary.interrupted)
+        ):
+            from stepwise.services.power import lock_workstation
+
+            lock_workstation()
         if summary:
             dlg = RunSummaryDialog(summary, parent=self)
+            dlg.jump_to_step_requested.connect(self._jump_to_step)
             dlg.exec()
+
+    def _jump_to_step(self, step_id: str) -> None:
+        self.action_tree.highlight_step(step_id, is_running=False, is_failed=True)
+        for act in self._current_macro.all_actions():
+            if act.id == step_id:
+                self.prop_panel.set_action(act)
+                break
 
     def _pause_run(self) -> None:
         if self._controller:

@@ -47,6 +47,18 @@ def collect_referenced_variables(macro: Macro) -> list[str]:
                 for v in extract_variable_names(it.window_title):
                     if v not in var_names:
                         var_names.append(v)
+            elif (
+                it.type == "click"
+                and it.enabled
+                and it.target_mode == "selector"
+                and it.selector
+                and isinstance(it.selector, Mapping)
+            ):
+                for key in ("window_title", "name"):
+                    raw_val = str(it.selector.get(key) or "")
+                    for v in extract_variable_names(raw_val):
+                        if v not in var_names:
+                            var_names.append(v)
             elif it.type == "group" and it.items:
                 _scan(it.items)
 
@@ -101,6 +113,18 @@ def run_preflight_checks(
                 _check_image(it.verify.image, f"{sec_name} step {it.id} Verify")
             if it.image:
                 _check_image(it.image, f"{sec_name} step {it.id} {it.type}")
+            if it.type == "click" and it.enabled and it.target_mode == "selector":
+                if not it.selector or not any(
+                    str(it.selector.get(k) or "").strip()
+                    for k in ("window_title", "name", "automation_id", "class_name")
+                ):
+                    issues.append(
+                        PreflightIssue(
+                            level="ERROR",
+                            message=f'Step "{it.note or it.id}" uses UI Selector mode, but no target element is configured.',
+                            details=f"Section: {sec_name}",
+                        )
+                    )
             if it.type == "group":
                 _scan_images(it.items, f"{sec_name} Group '{it.name}'")
 

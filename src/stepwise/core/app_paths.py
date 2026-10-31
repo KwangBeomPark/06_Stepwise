@@ -25,6 +25,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "countdown_seconds": 3,
     "default_wait_before": 0.2,
     "image_confidence": 0.95,
+    "language": "ko",
+    "theme": "dark",
     "window_geometry": None,
     "splitter_state": None,
 }

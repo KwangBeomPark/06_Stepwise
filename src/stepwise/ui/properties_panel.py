@@ -1,10 +1,11 @@
 """Action properties panel implementing Section 12.3 specifications.
 
 Provides dynamic, type-specific property editors with:
-- Pick (F8) and Capture (F9) triggers
-- Universal Guard / Verify collapsible controls
+- Pick (F8), Capture (F9), and Pick UI Element (Ctrl+F8) triggers
+- UI Selector & Simulate Click configuration and live validation
+- Universal Guard / Verify controls
 - Variable autocomplete hint on '{'
-- Real-time model synchronization
+- Real-time model synchronization & Dark/Light theme support
 """
 
 from __future__ import annotations
@@ -27,14 +28,19 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from stepwise.core.models import ActionItem
+from stepwise.core.models import ActionItem, ImageCondition
 from stepwise.ui.strings import Strings
+from stepwise.ui.theme import get_theme_tokens
 
 
 class PropertiesPanel(QWidget):
     property_changed = Signal()
     request_pick = Signal()
+    request_pick_element = Signal()
+    request_validate_selector = Signal(object)
     request_capture = Signal()
+    request_capture_guard = Signal()
+    request_capture_verify = Signal()
     request_test_step = Signal(object)
     request_test_match = Signal(object)
     request_show_crosshair = Signal(int, int)
@@ -50,9 +56,8 @@ class PropertiesPanel(QWidget):
         main_layout.setSpacing(8)
 
         # Header Title
-        title_lbl = QLabel(Strings.PROPERTIES_TITLE)
-        title_lbl.setStyleSheet("font-size: 14px; font-weight: bold; color: #1e293b;")
-        main_layout.addWidget(title_lbl)
+        self.title_lbl = QLabel(Strings.PROPERTIES_TITLE)
+        main_layout.addWidget(self.title_lbl)
 
         # Scroll Area for dynamic properties
         self.scroll = QScrollArea()
@@ -66,19 +71,33 @@ class PropertiesPanel(QWidget):
         self.scroll.setWidget(self.container)
         main_layout.addWidget(self.scroll)
 
+        self._apply_theme_styles()
         self._build_empty_state()
 
+    def _apply_theme_styles(self) -> None:
+        t = get_theme_tokens()
+        self.title_lbl.setStyleSheet(
+            f"font-size: 14px; font-weight: bold; color: {t['text_heading']};"
+        )
+
+    def retranslate_ui(self) -> None:
+        """Rebuild properties panel with active language and theme tokens."""
+        self.title_lbl.setText(Strings.PROPERTIES_TITLE)
+        self._apply_theme_styles()
+        self.set_action(self._current_action)
+
     def _build_empty_state(self) -> None:
+        t = get_theme_tokens()
         self._clear_container()
         guide_widget = QWidget()
         guide_layout = QVBoxLayout(guide_widget)
-        guide_layout.setContentsMargins(16, 16, 16, 16)
+        guide_layout.setContentsMargins(12, 12, 12, 12)
         guide_layout.setSpacing(10)
 
         lbl = QLabel(Strings.PROPERTIES_GUIDE)
         lbl.setStyleSheet(
-            "background-color: #f8fafc; color: #1e293b; padding: 18px; "
-            "border: 1px solid #cbd5e1; border-radius: 8px; line-height: 150%; font-size: 13px;"
+            f"background-color: {t['guide_bg']}; color: {t['guide_fg']}; padding: 18px; "
+            f"border: 1px solid {t['border']}; border-radius: 8px; line-height: 150%; font-size: 13px;"
         )
         lbl.setTextFormat(Qt.RichText)
         lbl.setWordWrap(True)
@@ -114,10 +133,10 @@ class PropertiesPanel(QWidget):
         self._clear_container()
 
         # 1. Common Settings
-        common_box = QGroupBox("General Options")
+        common_box = QGroupBox(Strings.GENERAL_OPTIONS)
         common_layout = QFormLayout(common_box)
 
-        self.chk_enabled = QCheckBox("Action Enabled")
+        self.chk_enabled = QCheckBox(Strings.ACTION_ENABLED)
         self.chk_enabled.setChecked(action.enabled)
         self.chk_enabled.toggled.connect(self._on_enabled_toggled)
         common_layout.addRow(self.chk_enabled)
@@ -143,6 +162,94 @@ class PropertiesPanel(QWidget):
         act_layout = QFormLayout(act_box)
 
         if action.type == "click":
+            # Target Mode (Coordinates vs UI Selector)
+            self.cmb_target_mode = QComboBox()
+            self.cmb_target_mode.addItem(Strings.TARGET_MODE_COORDS, "coordinates")
+            self.cmb_target_mode.addItem(Strings.TARGET_MODE_SELECTOR, "selector")
+            idx_tmode = 1 if action.target_mode == "selector" else 0
+            self.cmb_target_mode.setCurrentIndex(idx_tmode)
+            act_layout.addRow(Strings.TARGET_MODE_LABEL, self.cmb_target_mode)
+
+            # Click Method (Hardware SendInput vs Simulate Click)
+            self.cmb_click_method = QComboBox()
+            self.cmb_click_method.addItem(Strings.CLICK_METHOD_HARDWARE, "hardware")
+            self.cmb_click_method.addItem(Strings.CLICK_METHOD_SIMULATE, "simulate")
+            idx_cmethod = 1 if action.click_method == "simulate" else 0
+            self.cmb_click_method.setCurrentIndex(idx_cmethod)
+            act_layout.addRow(Strings.CLICK_METHOD_LABEL, self.cmb_click_method)
+
+            # UI Selector Configuration Group
+            self.selector_box = QGroupBox("🎯 UI Element Selector")
+            sel_layout = QFormLayout(self.selector_box)
+
+            h_sel_btns = QHBoxLayout()
+            btn_pick_elem = QPushButton(Strings.PICK_UI_ELEMENT)
+            btn_pick_elem.setToolTip(Strings.Tooltips.PICK_UI_ELEMENT)
+            btn_pick_elem.clicked.connect(self.request_pick_element.emit)
+
+            btn_val_sel = QPushButton(Strings.VALIDATE_SELECTOR)
+            btn_val_sel.clicked.connect(lambda: self.request_validate_selector.emit(action))
+            h_sel_btns.addWidget(btn_pick_elem)
+            h_sel_btns.addWidget(btn_val_sel)
+            sel_layout.addRow(h_sel_btns)
+
+            sel_dict = action.selector or {}
+            self.txt_sel_win = QLineEdit(str(sel_dict.get("window_title") or ""))
+            self.txt_sel_win.setPlaceholderText("e.g. SAP*, Order Entry*")
+            self.txt_sel_type = QLineEdit(str(sel_dict.get("control_type") or ""))
+            self.txt_sel_type.setPlaceholderText("e.g. Button, Edit")
+            self.txt_sel_aid = QLineEdit(str(sel_dict.get("automation_id") or ""))
+            self.txt_sel_aid.setPlaceholderText("Control / Automation ID")
+            self.txt_sel_name = QLineEdit(str(sel_dict.get("name") or ""))
+            self.txt_sel_name.setPlaceholderText("Button text or {Column}")
+            self.txt_sel_cls = QLineEdit(str(sel_dict.get("class_name") or ""))
+            self.txt_sel_cls.setPlaceholderText("Win32 Class Name")
+
+            def _sync_selector() -> None:
+                if action.selector is None:
+                    action.selector = {}
+                action.selector["window_title"] = self.txt_sel_win.text().strip()
+                action.selector["control_type"] = self.txt_sel_type.text().strip()
+                action.selector["automation_id"] = self.txt_sel_aid.text().strip()
+                action.selector["name"] = self.txt_sel_name.text().strip()
+                action.selector["class_name"] = self.txt_sel_cls.text().strip()
+                if any(action.selector.get(k) for k in ("window_title", "name", "automation_id", "class_name")):
+                    action.target_mode = "selector"
+                    if self.cmb_target_mode.currentIndex() != 1:
+                        self.cmb_target_mode.blockSignals(True)
+                        self.cmb_target_mode.setCurrentIndex(1)
+                        self.cmb_target_mode.blockSignals(False)
+                self.property_changed.emit()
+
+            self.txt_sel_win.textChanged.connect(lambda _: _sync_selector())
+            self.txt_sel_type.textChanged.connect(lambda _: _sync_selector())
+            self.txt_sel_aid.textChanged.connect(lambda _: _sync_selector())
+            self.txt_sel_name.textChanged.connect(lambda _: _sync_selector())
+            self.txt_sel_cls.textChanged.connect(lambda _: _sync_selector())
+
+            sel_layout.addRow(Strings.SELECTOR_WINDOW_TITLE, self.txt_sel_win)
+            sel_layout.addRow(Strings.SELECTOR_CONTROL_TYPE, self.txt_sel_type)
+            sel_layout.addRow(Strings.SELECTOR_AUTOMATION_ID, self.txt_sel_aid)
+            sel_layout.addRow(Strings.SELECTOR_NAME, self.txt_sel_name)
+            sel_layout.addRow(Strings.SELECTOR_CLASS_NAME, self.txt_sel_cls)
+
+            self.selector_box.setVisible(action.target_mode == "selector")
+
+            def _on_tmode_changed(_idx: int) -> None:
+                mode_val = self.cmb_target_mode.currentData()
+                action.target_mode = mode_val
+                if self.selector_box:
+                    self.selector_box.setVisible(mode_val == "selector")
+                self.property_changed.emit()
+
+            def _on_cmethod_changed(_idx: int) -> None:
+                action.click_method = self.cmb_click_method.currentData()
+                self.property_changed.emit()
+
+            self.cmb_target_mode.currentIndexChanged.connect(_on_tmode_changed)
+            self.cmb_click_method.currentIndexChanged.connect(_on_cmethod_changed)
+
+            # Coordinates row
             h_coords = QHBoxLayout()
             self.spin_x = QSpinBox()
             self.spin_x.setRange(-99999, 99999)
@@ -167,7 +274,7 @@ class PropertiesPanel(QWidget):
             h_coords.addWidget(QLabel("Y:"))
             h_coords.addWidget(self.spin_y)
             h_coords.addWidget(btn_pick)
-            act_layout.addRow("Coordinates:", h_coords)
+            act_layout.addRow(Strings.COORDINATES_LABEL, h_coords)
 
             h_helpers = QHBoxLayout()
             btn_show = QPushButton("📍 " + Strings.SHOW_ON_SCREEN)
@@ -180,7 +287,7 @@ class PropertiesPanel(QWidget):
 
             h_helpers.addWidget(btn_show)
             h_helpers.addWidget(btn_test_click)
-            act_layout.addRow("Action Tools:", h_helpers)
+            act_layout.addRow(Strings.ACTION_TOOLS_LABEL, h_helpers)
 
             self.cmb_button = QComboBox()
             self.cmb_button.addItems(["left", "right", "middle"])
@@ -197,6 +304,8 @@ class PropertiesPanel(QWidget):
                 lambda v: setattr(action, "clicks", v) or self.property_changed.emit()
             )
             act_layout.addRow(Strings.CLICKS, self.spin_clicks)
+
+            act_layout.addRow(self.selector_box)
 
         elif action.type == "type_text":
             self.txt_text = QLineEdit(action.text)
@@ -217,7 +326,7 @@ class PropertiesPanel(QWidget):
             btn_test_type = QPushButton("⚡ " + Strings.TEST_THIS_STEP)
             btn_test_type.setToolTip(Strings.Tooltips.TEST_THIS_STEP)
             btn_test_type.clicked.connect(lambda: self.request_test_step.emit(action))
-            act_layout.addRow("Action Tools:", btn_test_type)
+            act_layout.addRow(Strings.ACTION_TOOLS_LABEL, btn_test_type)
 
             self.cmb_mode = QComboBox()
             self.cmb_mode.addItems(["paste", "keystrokes"])
@@ -245,7 +354,7 @@ class PropertiesPanel(QWidget):
             btn_test_key = QPushButton("⚡ " + Strings.TEST_THIS_STEP)
             btn_test_key.setToolTip(Strings.Tooltips.TEST_THIS_STEP)
             btn_test_key.clicked.connect(lambda: self.request_test_step.emit(action))
-            act_layout.addRow("Action Tools:", btn_test_key)
+            act_layout.addRow(Strings.ACTION_TOOLS_LABEL, btn_test_key)
 
             self.spin_repeat = QSpinBox()
             self.spin_repeat.setRange(1, 100)
@@ -384,7 +493,46 @@ class PropertiesPanel(QWidget):
 
         self.container_layout.addWidget(act_box)
 
-        # 3. Action Buttons (Test this step)
+        # 3. Guard & Verify Visual Safety Checks (for non-image, non-group actions)
+        if action.type not in ("click_image", "wait_image", "wait_image_gone", "group"):
+            safety_box = QGroupBox("🛡️ Guard & Verify (Visual Safety)")
+            safety_layout = QFormLayout(safety_box)
+
+            self.txt_guard_image = QLineEdit(action.guard.image if action.guard else "")
+            self.txt_guard_image.setPlaceholderText(Strings.GUARD_PLACEHOLDER)
+
+            def _on_guard_text(val: str) -> None:
+                v = val.strip()
+                if not v:
+                    action.guard = None
+                elif action.guard is not None:
+                    action.guard.image = v
+                else:
+                    action.guard = ImageCondition(image=v)
+                self.property_changed.emit()
+
+            self.txt_guard_image.textChanged.connect(_on_guard_text)
+            safety_layout.addRow(Strings.GUARD_SECTION, self.txt_guard_image)
+
+            self.txt_verify_image = QLineEdit(action.verify.image if action.verify else "")
+            self.txt_verify_image.setPlaceholderText(Strings.VERIFY_PLACEHOLDER)
+
+            def _on_verify_text(val: str) -> None:
+                v = val.strip()
+                if not v:
+                    action.verify = None
+                elif action.verify is not None:
+                    action.verify.image = v
+                else:
+                    action.verify = ImageCondition(image=v)
+                self.property_changed.emit()
+
+            self.txt_verify_image.textChanged.connect(_on_verify_text)
+            safety_layout.addRow(Strings.VERIFY_SECTION, self.txt_verify_image)
+
+            self.container_layout.addWidget(safety_box)
+
+        # 4. Action Buttons (Test this step)
         btn_layout = QHBoxLayout()
         btn_test = QPushButton(Strings.TEST_THIS_STEP)
         btn_test.setToolTip(Strings.Tooltips.TEST_THIS_STEP)

@@ -3,9 +3,10 @@
 Displays 3 sections (Setup / Per Row / Cleanup) in a unified tree view with:
 - Sibling reordering with buttons and tree-scoped shortcuts
 - Enabled checkboxes
-- Sentence-style Target summaries
+- Sentence-style Target summaries (including UI Selector & Simulate Click badges)
 - Live running highlight and auto-scroll
 - Search & filter capabilities
+- Theme-token aware rendering (Dark / Light)
 """
 
 from __future__ import annotations
@@ -27,14 +28,27 @@ from PySide6.QtWidgets import (
 
 from stepwise.core.models import ActionItem, Macro
 from stepwise.ui.strings import Strings
+from stepwise.ui.theme import get_theme_tokens
 
 
 def format_action_target(action: ActionItem) -> str:
     """Generate human-readable sentence-style target string."""
     if action.type == "click":
         btn_str = f" ({action.button})" if action.button != "left" else ""
-        clicks_str = " Double" if action.clicks == 2 else ""
-        return f"{clicks_str}Click ({action.x}, {action.y}){btn_str}"
+        clicks_str = "Double " if action.clicks == 2 else ""
+        sim_badge = "⚡Sim " if action.click_method == "simulate" else ""
+        if action.target_mode == "selector" and action.selector:
+            sel = action.selector
+            c_type = sel.get("control_type") or "Element"
+            ident = (
+                sel.get("name")
+                or sel.get("automation_id")
+                or sel.get("class_name")
+                or sel.get("window_title")
+                or "Target"
+            )
+            return f'{sim_badge}🎯 {clicks_str}Click [{c_type}] "{ident}"{btn_str}'
+        return f"{sim_badge}{clicks_str}Click ({action.x}, {action.y}){btn_str}"
     if action.type == "click_image":
         return f'Click image "{action.image or ""}"'
     if action.type == "type_text":
@@ -98,25 +112,12 @@ class ActionTreeWidget(QWidget):
         # Real-time insertion target indicator banner
         self.lbl_target = QLabel()
         self.lbl_target.setTextFormat(Qt.TextFormat.PlainText)
-        self.lbl_target.setStyleSheet(
-            "QLabel { background-color: #f1f5f9; color: #334155; "
-            "border: 1px solid #cbd5e1; border-radius: 4px; padding: 3px 8px; font-weight: 500; font-size: 11px; }"
-        )
+        self._apply_banner_style()
         layout.addWidget(self.lbl_target)
 
         # Tree Widget
         self.tree = QTreeWidget()
-        self.tree.setHeaderLabels(
-            [
-                Strings.COL_NUM,
-                Strings.COL_ENABLED,
-                Strings.COL_ACTION,
-                Strings.COL_TARGET,
-                Strings.COL_WAIT,
-                Strings.COL_CHECK,
-                Strings.COL_NOTE,
-            ]
-        )
+        self._update_headers()
         self.tree.setDragDropMode(QTreeWidget.NoDragDrop)
         self.tree.setSelectionMode(QTreeWidget.SingleSelection)
         self.tree.setAlternatingRowColors(True)
@@ -161,6 +162,36 @@ class ActionTreeWidget(QWidget):
         self.act_del.triggered.connect(self._on_shortcut_delete)
         self.tree.addAction(self.act_del)
         self._update_target_label()
+
+    def _apply_banner_style(self) -> None:
+        t = get_theme_tokens()
+        self.lbl_target.setStyleSheet(
+            f"QLabel {{ background-color: {t['banner_bg']}; color: {t['banner_fg']}; "
+            f"border: 1px solid {t['border']}; border-radius: 4px; padding: 3px 8px; "
+            f"font-weight: 500; font-size: 11px; }}"
+        )
+
+    def _update_headers(self) -> None:
+        self.tree.setHeaderLabels(
+            [
+                Strings.COL_NUM,
+                Strings.COL_ENABLED,
+                Strings.COL_ACTION,
+                Strings.COL_TARGET,
+                Strings.COL_WAIT,
+                Strings.COL_CHECK,
+                Strings.COL_NOTE,
+            ]
+        )
+
+    def retranslate_ui(self) -> None:
+        """Refresh strings and theme colors on language or theme switch."""
+        self.txt_search.setPlaceholderText(Strings.SEARCH_ACTIONS)
+        self.chk_compact.setText(Strings.COMPACT_VIEW)
+        self._apply_banner_style()
+        self._update_headers()
+        self._on_compact_toggled(self._is_compact)
+        self.rebuild_tree()
 
     def _get_selected_action(self) -> ActionItem | None:
         selected = self.tree.selectedItems()
@@ -302,10 +333,10 @@ class ActionTreeWidget(QWidget):
             if isinstance(data, ActionItem):
                 menu.addSeparator()
 
-                act_up = menu.addAction("↑ Move Up")
+                act_up = menu.addAction(f"↑ {Strings.MOVE_UP}")
                 act_up.triggered.connect(lambda: self.request_move_up.emit(data))
 
-                act_down = menu.addAction("↓ Move Down")
+                act_down = menu.addAction(f"↓ {Strings.MOVE_DOWN}")
                 act_down.triggered.connect(lambda: self.request_move_down.emit(data))
 
                 menu.addSeparator()
@@ -322,10 +353,10 @@ class ActionTreeWidget(QWidget):
                 )
 
                 menu.addSeparator()
-                act_dup = menu.addAction("📋 Duplicate")
+                act_dup = menu.addAction(f"📋 {Strings.DUPLICATE}")
                 act_dup.triggered.connect(lambda: self.request_duplicate_action.emit(data))
 
-                act_del = menu.addAction("🗑 Delete")
+                act_del = menu.addAction(f"🗑 {Strings.DELETE}")
                 act_del.triggered.connect(lambda: self.request_delete_action.emit(data))
 
         menu.exec(self.tree.viewport().mapToGlobal(pos))
@@ -336,6 +367,7 @@ class ActionTreeWidget(QWidget):
         self.rebuild_tree()
 
     def _add_empty_placeholder(self, parent: QTreeWidgetItem, sec_name: str) -> None:
+        t = get_theme_tokens()
         placeholder = QTreeWidgetItem(["", "", Strings.SECTION_EMPTY_PLACEHOLDER, "", "", "", ""])
         placeholder.setData(0, Qt.ItemDataRole.UserRole, f"empty_{sec_name}")
         placeholder.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
@@ -343,12 +375,12 @@ class ActionTreeWidget(QWidget):
         p_font.setItalic(True)
         placeholder.setFont(2, p_font)
         for col in range(7):
-            placeholder.setForeground(col, QBrush(QColor("#94a3b8")))
+            placeholder.setForeground(col, QBrush(QColor(t["text_muted"])))
         parent.addChild(placeholder)
 
     def rebuild_tree(self, select_id: str | None = None) -> None:
         """Reconstruct tree nodes from self._macro and restore selection."""
-        # Determine target item to re-select after rebuild
+        t = get_theme_tokens()
         target_restore_key = select_id
         if not target_restore_key:
             curr_selected = self.tree.selectedItems()
@@ -368,6 +400,8 @@ class ActionTreeWidget(QWidget):
             return
 
         step_counter = 1
+        sec_bg = QBrush(QColor(t["bg_section"]))
+        sec_fg = QBrush(QColor(t["accent"]))
 
         # Section 1: SETUP
         setup_header = QTreeWidgetItem(["", "", Strings.SECTION_SETUP, "", "", "", ""])
@@ -377,8 +411,8 @@ class ActionTreeWidget(QWidget):
         setup_font.setBold(True)
         setup_header.setFont(2, setup_font)
         for col in range(7):
-            setup_header.setBackground(col, QBrush(QColor("#f1f5f9")))
-            setup_header.setForeground(col, QBrush(QColor("#1e293b")))
+            setup_header.setBackground(col, sec_bg)
+            setup_header.setForeground(col, sec_fg)
             setup_header.setToolTip(col, Strings.Tooltips.SECTION_SETUP)
         self.tree.addTopLevelItem(setup_header)
 
@@ -395,8 +429,8 @@ class ActionTreeWidget(QWidget):
         per_row_header.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
         per_row_header.setFont(2, setup_font)
         for col in range(7):
-            per_row_header.setBackground(col, QBrush(QColor("#f1f5f9")))
-            per_row_header.setForeground(col, QBrush(QColor("#1e293b")))
+            per_row_header.setBackground(col, sec_bg)
+            per_row_header.setForeground(col, sec_fg)
             per_row_header.setToolTip(col, Strings.Tooltips.SECTION_PER_ROW)
         self.tree.addTopLevelItem(per_row_header)
 
@@ -413,8 +447,8 @@ class ActionTreeWidget(QWidget):
         cleanup_header.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
         cleanup_header.setFont(2, setup_font)
         for col in range(7):
-            cleanup_header.setBackground(col, QBrush(QColor("#f1f5f9")))
-            cleanup_header.setForeground(col, QBrush(QColor("#1e293b")))
+            cleanup_header.setBackground(col, sec_bg)
+            cleanup_header.setForeground(col, sec_fg)
             cleanup_header.setToolTip(col, Strings.Tooltips.SECTION_CLEANUP)
         self.tree.addTopLevelItem(cleanup_header)
 
@@ -448,7 +482,6 @@ class ActionTreeWidget(QWidget):
                 node_to_select = self._find_node_by_step_id(str(target_restore_key))
 
         if node_to_select:
-            # Explicit additions/moves must remain visible even with a search active.
             if select_id and node_to_select.isHidden():
                 self.txt_search.clear()
             ancestor = node_to_select.parent()
@@ -462,7 +495,8 @@ class ActionTreeWidget(QWidget):
         self._on_selection_changed()
 
     def _add_action_node(self, parent: QTreeWidgetItem, act: ActionItem, counter: int) -> int:
-        text_color = QColor("#0f172a") if act.enabled else QColor("#94a3b8")
+        t = get_theme_tokens()
+        text_color = QColor(t["text"]) if act.enabled else QColor(t["text_disabled"])
         if act.type == "group":
             group_item = QTreeWidgetItem(
                 [
@@ -489,7 +523,6 @@ class ActionTreeWidget(QWidget):
                 self._add_empty_placeholder(group_item, f"group_{act.id}")
             return counter
         else:
-            # Action check indicator
             checks: list[str] = []
             if act.guard:
                 checks.append("🛡 Guard")
@@ -534,11 +567,12 @@ class ActionTreeWidget(QWidget):
 
     def _on_item_changed(self, item: QTreeWidgetItem, column: int) -> None:
         if column == 1:
+            t = get_theme_tokens()
             data = item.data(0, Qt.UserRole)
             if isinstance(data, ActionItem):
                 is_checked = item.checkState(1) == Qt.Checked
                 data.enabled = is_checked
-                text_color = QColor("#0f172a") if is_checked else QColor("#94a3b8")
+                text_color = QColor(t["text"]) if is_checked else QColor(t["text_disabled"])
                 for col in range(7):
                     item.setForeground(col, QBrush(text_color))
                 self.macro_modified.emit()
@@ -549,11 +583,11 @@ class ActionTreeWidget(QWidget):
 
     def _on_compact_toggled(self, checked: bool) -> None:
         self._is_compact = checked
-        # Normal vs Compact row height adjustment
-        padding = "2px" if checked else "6px"
+        t = get_theme_tokens()
+        padding = "2px" if checked else "5px"
         self.tree.setStyleSheet(
-            f"QTreeWidget {{ background-color: #ffffff; color: #0f172a; }} "
-            f"QTreeWidget::item {{ padding: {padding}; color: #0f172a; }}"
+            f"QTreeWidget {{ background-color: {t['bg_base']}; color: {t['text']}; }} "
+            f"QTreeWidget::item {{ padding: {padding} 8px; color: {t['text']}; }}"
         )
 
     def _apply_filter(self) -> None:
@@ -576,7 +610,6 @@ class ActionTreeWidget(QWidget):
             node.setHidden(not child_matches and node.childCount() > 0)
             return child_matches
 
-        # Check self text match
         text_matches = True
         if self._search_query:
             combined = f"{node.text(2)} {node.text(3)} {node.text(6)}".lower()
@@ -590,7 +623,7 @@ class ActionTreeWidget(QWidget):
         self, step_id: str, is_running: bool = True, is_failed: bool = False
     ) -> None:
         """Highlight current executing or failed step and auto-scroll to center."""
-        # Clear previous highlight
+        t = get_theme_tokens()
         if self._highlighted_item:
             self._highlighted_item.setBackground(0, QBrush())
             self._highlighted_item.setBackground(2, QBrush())
@@ -599,7 +632,11 @@ class ActionTreeWidget(QWidget):
         node = self._find_node_by_step_id(step_id)
         if node:
             self._highlighted_item = node
-            bg_color = QColor("#fecaca") if is_failed else QColor("#fef08a")
+            bg_color = (
+                QColor(t["highlight_fail_bg"])
+                if is_failed
+                else QColor(t["highlight_run_bg"])
+            )
             node.setBackground(0, QBrush(bg_color))
             node.setBackground(2, QBrush(bg_color))
             node.setBackground(3, QBrush(bg_color))

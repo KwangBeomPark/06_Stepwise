@@ -1,3 +1,3 @@
 """Stepwise - Windows Data-Driven Macro Automation Tool."""
 
-__version__ = "0.3.1"
+__version__ = "0.4.0"

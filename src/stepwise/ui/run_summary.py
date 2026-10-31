@@ -11,6 +11,7 @@ from __future__ import annotations
 import csv
 import os
 
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QDialog,
     QFileDialog,
@@ -27,9 +28,12 @@ from PySide6.QtWidgets import (
 from stepwise.engine.results import RESULTS_COLUMNS
 from stepwise.engine.runner import RunSummary
 from stepwise.ui.strings import Strings
+from stepwise.ui.theme import get_theme_tokens
 
 
 class RunSummaryDialog(QDialog):
+    jump_to_step_requested = Signal(str)
+
     def __init__(
         self,
         summary: RunSummary,
@@ -38,13 +42,14 @@ class RunSummaryDialog(QDialog):
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Stepwise — Execution Summary")
-        self.resize(480, 420)
+        self.resize(480, 440)
 
         self.summary = summary
         results_csv_path = (
             results_csv_path or summary.pending_results_path or summary.results_csv_path
         )
         self.results_csv_path = results_csv_path
+        t = get_theme_tokens()
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(18, 18, 18, 18)
@@ -57,7 +62,9 @@ class RunSummaryDialog(QDialog):
             else "Run Stopped"
         )
         title_color = (
-            "#16a34a" if summary.failed_count == 0 and not summary.interrupted else "#dc2626"
+            t["status_ok"]
+            if summary.failed_count == 0 and not summary.interrupted
+            else t["status_fail"]
         )
         lbl_title = QLabel(title_text)
         lbl_title.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {title_color};")
@@ -71,7 +78,8 @@ class RunSummaryDialog(QDialog):
         form_stats.addRow("Total Rows:", QLabel(str(summary.total_rows)))
         form_stats.addRow("Done Rows:", QLabel(f"<b>{summary.done_count}</b>"))
         form_stats.addRow(
-            "Failed Rows:", QLabel(f'<span style="color:red;"><b>{summary.failed_count}</b></span>')
+            "Failed Rows:",
+            QLabel(f'<span style="color:{t["status_fail"]};"><b>{summary.failed_count}</b></span>'),
         )
         form_stats.addRow("Interrupted Rows:", QLabel(str(summary.interrupted_count)))
         layout.addWidget(box_stats)
@@ -92,13 +100,22 @@ class RunSummaryDialog(QDialog):
 
             lbl_reason = QLabel(summary.failure.formatted_reason())
             lbl_reason.setWordWrap(True)
-            lbl_reason.setStyleSheet("color: #b91c1c; font-weight: 500;")
+            lbl_reason.setStyleSheet(f"color: {t['status_fail']}; font-weight: 500;")
             layout_fail.addWidget(lbl_reason)
+
+            h_fail_btns = QHBoxLayout()
+            if summary.failure.step_id:
+                btn_jump = QPushButton("🎯 Jump to Failed Step")
+                btn_jump.clicked.connect(lambda: self._on_jump_to_step(summary.failure.step_id))
+                h_fail_btns.addWidget(btn_jump)
 
             if summary.screenshot_path and os.path.exists(summary.screenshot_path):
                 btn_shot = QPushButton("📷 Open Failure Screenshot")
                 btn_shot.clicked.connect(lambda: self._open_file(summary.screenshot_path))
-                layout_fail.addWidget(btn_shot)
+                h_fail_btns.addWidget(btn_shot)
+
+            if h_fail_btns.count() > 0:
+                layout_fail.addLayout(h_fail_btns)
 
             layout.addWidget(box_fail)
 
@@ -134,6 +151,11 @@ class RunSummaryDialog(QDialog):
                 os.fsync(output.fileno())
         except OSError as e:
             QMessageBox.warning(self, Strings.SAVE_ERROR_TITLE, str(e))
+
+    def _on_jump_to_step(self, step_id: str | None) -> None:
+        if step_id:
+            self.jump_to_step_requested.emit(step_id)
+            self.accept()
 
     def _open_file(self, filepath: str) -> None:
         try:

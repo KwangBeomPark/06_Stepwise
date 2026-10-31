@@ -1,26 +1,30 @@
-"""Full-screen capture overlay for Pick (F8) and Region Capture (F9) (Section 12.4).
+"""Full-screen capture overlay for Pick (F8), Region Capture (F9), and UI Element Picker (Ctrl+F8).
 
-Displays a frozen snapshot of the screen to allow precise coordinate picking or region dragging.
+Displays a frozen snapshot of the screen to allow precise coordinate picking,
+region dragging, or live UI element inspection without accidentally clicking the target app.
 """
 
 from __future__ import annotations
 
 import os
+import time
 import uuid
 from math import ceil, floor
 from typing import Any
 
 import cv2
 from PySide6.QtCore import QPoint, QRect, Qt, Signal
-from PySide6.QtGui import QColor, QImage, QPainter, QPaintEvent, QPen, QPixmap
+from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPaintEvent, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QWidget
 
 from stepwise.services.screen import capture_screen
+from stepwise.services.uia_win import UIElementInfo, inspect_element_at
 
 
 class CaptureOverlay(QWidget):
     coords_picked = Signal(int, int)  # (x, y)
     region_captured = Signal(str, list)  # (saved_image_path, [x, y, w, h])
+    element_picked = Signal(dict, int, int)  # (selector_dict, fallback_x, fallback_y)
     cancelled = Signal()
     capture_failed = Signal(str)
 
@@ -31,7 +35,7 @@ class CaptureOverlay(QWidget):
             parent,
             Qt.Window | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint,
         )
-        self.mode = mode  # "pick" or "region"
+        self.mode = mode  # "pick", "region", or "element"
         self.images_dir = images_dir
         if self.mode == "region":
             os.makedirs(self.images_dir, exist_ok=True)
@@ -40,8 +44,12 @@ class CaptureOverlay(QWidget):
         self._start_pos: QPoint | None = None
         self._curr_pos: QPoint | None = None
         self._is_selecting = False
+        self._hovered_element: UIElementInfo | None = None
+        self._last_inspect_ts: float = 0.0
+        self._last_inspect_pt: tuple[int, int] = (-9999, -9999)
 
         self._capture_screen_freeze()
+        self.setMouseTracking(True)
 
         # Fill primary screen
         screen = QApplication.primaryScreen()
@@ -94,13 +102,57 @@ class CaptureOverlay(QWidget):
             painter.setPen(Qt.white)
             painter.drawText(rect.x() + 5, max(15, rect.y() - 5), info_text)
 
+        elif self.mode == "element" and self._hovered_element is not None:
+            dpr = getattr(self, "_dpr", 1.0) or 1.0
+            el_left, el_top, el_w, el_h = self._hovered_element.rect
+            log_rect = QRect(
+                int(round(el_left / dpr)),
+                int(round(el_top / dpr)),
+                max(8, int(round(el_w / dpr))),
+                max(8, int(round(el_h / dpr))),
+            )
+            if self._freeze_pixmap:
+                painter.drawPixmap(log_rect, self._freeze_pixmap, QRect(el_left, el_top, el_w, el_h))
+
+            pen = QPen(QColor("#38bdf8"), 2, Qt.SolidLine)
+            painter.setPen(pen)
+            painter.setBrush(QColor(56, 189, 248, 35))
+            painter.drawRect(log_rect)
+
+            # Element info badge
+            badge_text = self._hovered_element.summary_label()
+            painter.setFont(QFont("Malgun Gothic", 10, QFont.Weight.Bold))
+            badge_w = min(self.width() - 20, max(240, len(badge_text) * 8 + 24))
+            badge_x = max(10, min(log_rect.x(), self.width() - badge_w - 10))
+            badge_y = max(10, log_rect.y() - 28)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(15, 23, 42, 235))
+            painter.drawRoundedRect(badge_x, badge_y, badge_w, 24, 4, 4)
+            painter.setPen(QColor("#38bdf8"))
+            painter.drawText(
+                badge_x + 8,
+                badge_y,
+                badge_w - 16,
+                24,
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                badge_text,
+            )
+
     def mousePressEvent(self, event: Any) -> None:
         if event.button() == Qt.LeftButton:
             dpr = getattr(self, "_dpr", 1.0)
+            x = int(round(event.position().x() * dpr))
+            y = int(round(event.position().y() * dpr))
             if self.mode == "pick":
-                x = int(round(event.position().x() * dpr))
-                y = int(round(event.position().y() * dpr))
                 self.coords_picked.emit(x, y)
+                self.close()
+            elif self.mode == "element":
+                elem = self._hovered_element or inspect_element_at(x, y, exclude_self=True)
+                if elem is not None:
+                    tx, ty = elem.target_point()
+                    self.element_picked.emit(elem.to_selector_dict(), tx, ty)
+                else:
+                    self.coords_picked.emit(x, y)
                 self.close()
             elif self.mode == "region":
                 self._start_pos = event.pos()
@@ -111,6 +163,18 @@ class CaptureOverlay(QWidget):
     def mouseMoveEvent(self, event: Any) -> None:
         if self.mode == "region" and self._is_selecting:
             self._curr_pos = event.pos()
+            self.update()
+        elif self.mode == "element":
+            dpr = getattr(self, "_dpr", 1.0)
+            x = int(round(event.position().x() * dpr))
+            y = int(round(event.position().y() * dpr))
+            now = time.monotonic()
+            lx, ly = self._last_inspect_pt
+            if (now - self._last_inspect_ts) < 0.045 and abs(x - lx) + abs(y - ly) < 4:
+                return
+            self._last_inspect_ts = now
+            self._last_inspect_pt = (x, y)
+            self._hovered_element = inspect_element_at(x, y, exclude_self=True)
             self.update()
 
     def mouseReleaseEvent(self, event: Any) -> None:

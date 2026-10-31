@@ -131,6 +131,9 @@ class ActionItem:
     y: int = 0
     button: Literal["left", "right", "middle"] = "left"
     clicks: int = 1
+    target_mode: Literal["coordinates", "selector"] = "coordinates"
+    selector: dict[str, Any] | None = None
+    click_method: Literal["hardware", "simulate"] = "hardware"
 
     # Image action parameters
     image: str | None = None
@@ -186,6 +189,12 @@ class ActionItem:
 
         if self.type == "click":
             data.update({"x": self.x, "y": self.y, "button": self.button, "clicks": self.clicks})
+            if self.target_mode != "coordinates" or self.selector is not None:
+                data["target_mode"] = self.target_mode
+            if self.selector is not None:
+                data["selector"] = dict(self.selector)
+            if self.click_method != "hardware":
+                data["click_method"] = self.click_method
         elif self.type == "click_image":
             data.update(
                 {
@@ -268,6 +277,12 @@ class ActionItem:
         act.y = int(data.get("y", 0))
         act.button = data.get("button", "left")
         act.clicks = int(data.get("clicks", 1))
+        raw_selector = data.get("selector")
+        act.selector = dict(raw_selector) if isinstance(raw_selector, dict) else None
+        act.target_mode = data.get(
+            "target_mode", "selector" if act.selector is not None else "coordinates"
+        )
+        act.click_method = data.get("click_method", "hardware")
 
         act.image = data.get("image")
         act.region = data.get("region")

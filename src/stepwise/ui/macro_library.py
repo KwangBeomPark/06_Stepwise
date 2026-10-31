@@ -4,6 +4,7 @@ Features:
 - Folder-based macro listing with search filter
 - Collaborative edit lock status indicators
 - Create, duplicate, rename, and delete actions
+- Theme-aware rendering and bilingual UI support
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ from stepwise.core.models import Macro
 from stepwise.core.package import save_package
 from stepwise.services.lock import check_lock_status
 from stepwise.ui.strings import Strings
+from stepwise.ui.theme import get_theme_tokens
 
 
 class MacroLibraryPanel(QWidget):
@@ -45,9 +47,8 @@ class MacroLibraryPanel(QWidget):
         layout.setSpacing(6)
 
         # Title
-        title_lbl = QLabel(Strings.LIBRARY_TITLE)
-        title_lbl.setStyleSheet("font-size: 14px; font-weight: bold; color: #1e293b;")
-        layout.addWidget(title_lbl)
+        self.title_lbl = QLabel(Strings.LIBRARY_TITLE)
+        layout.addWidget(self.title_lbl)
 
         # Search bar
         self.txt_search = QLineEdit()
@@ -72,6 +73,22 @@ class MacroLibraryPanel(QWidget):
 
         layout.addLayout(btn_layout)
 
+        self._apply_theme_styles()
+        self.refresh_list()
+
+    def _apply_theme_styles(self) -> None:
+        t = get_theme_tokens()
+        self.title_lbl.setStyleSheet(
+            f"font-size: 14px; font-weight: bold; color: {t['text_heading']};"
+        )
+
+    def retranslate_ui(self) -> None:
+        """Update labels and colors on language or theme switch."""
+        self.title_lbl.setText(Strings.LIBRARY_TITLE)
+        self.txt_search.setPlaceholderText(Strings.SEARCH_MACROS)
+        self.btn_new.setText(Strings.NEW_MACRO)
+        self.btn_duplicate.setText(Strings.DUPLICATE_MACRO)
+        self._apply_theme_styles()
         self.refresh_list()
 
     def set_library_dir(self, new_dir: str) -> None:
@@ -82,6 +99,7 @@ class MacroLibraryPanel(QWidget):
 
     def refresh_list(self) -> None:
         """Scan library folder and populate list."""
+        t = get_theme_tokens()
         self.list_widget.clear()
         if not os.path.exists(self.library_dir):
             return
@@ -93,12 +111,12 @@ class MacroLibraryPanel(QWidget):
 
                 item = QListWidgetItem(fname)
                 item.setData(Qt.UserRole, full_path)
-                item.setForeground(QBrush(QColor("#0f172a")))
+                item.setForeground(QBrush(QColor(t["text"])))
 
                 if is_locked:
                     lock_desc = f"🔒 Locked by {lock_info.user}" if lock_info else "🔒 Locked"
                     item.setText(f"{fname} ({lock_desc})")
-                    item.setForeground(QBrush(QColor("#dc2626")))
+                    item.setForeground(QBrush(QColor(t["status_fail"])))
 
                 self.list_widget.addItem(item)
 
@@ -115,7 +133,7 @@ class MacroLibraryPanel(QWidget):
             self.macro_selected.emit(swm_path)
 
     def _on_new_macro(self) -> None:
-        name, ok = QInputDialog.getText(self, "New Macro", "Enter macro name:")
+        name, ok = QInputDialog.getText(self, Strings.NEW_MACRO, "Enter macro name:")
         if ok and name.strip():
             safe_name = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in name.strip())
             swm_path = os.path.join(self.library_dir, f"{safe_name}.swm")

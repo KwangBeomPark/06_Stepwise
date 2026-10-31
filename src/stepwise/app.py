@@ -6,10 +6,13 @@ import os
 import sys
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QIcon, QPalette
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
+from stepwise.core.app_paths import load_user_settings
 from stepwise.ui.main_window import MainWindow
+from stepwise.ui.strings import apply_language
+from stepwise.ui.theme import apply_theme
 
 
 def get_app_icon_path() -> str:
@@ -38,13 +41,16 @@ def get_app_icon_path() -> str:
 
 
 def main() -> None:
-    # Ensure Windows taskbar displays custom icon rather than python.exe default
+    # Ensure Windows taskbar displays custom icon and Per-Monitor V2 DPI awareness
     if sys.platform == "win32":
         try:
             import ctypes
 
-            app_id = "stepwise.desktop.macro.automation.0.1.0"
+            app_id = "stepwise.desktop.macro.automation.0.4.0"
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
+            # DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4
+            if hasattr(ctypes.windll.user32, "SetProcessDpiAwarenessContext"):
+                ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))
         except Exception:
             pass
 
@@ -61,39 +67,10 @@ def main() -> None:
     if icon_path:
         app.setWindowIcon(QIcon(icon_path))
 
-    # Enforce clean, predictable Fusion style and consistent light palette
-    # to avoid half-dark/half-light rendering on Windows 11 Dark Mode
-    app.setStyle("Fusion")
-    palette = QPalette()
-    palette.setColor(QPalette.ColorRole.Window, QColor("#f8fafc"))
-    palette.setColor(QPalette.ColorRole.WindowText, QColor("#0f172a"))
-    palette.setColor(QPalette.ColorRole.Base, QColor("#ffffff"))
-    palette.setColor(QPalette.ColorRole.AlternateBase, QColor("#f1f5f9"))
-    palette.setColor(QPalette.ColorRole.ToolTipBase, QColor("#1e293b"))
-    palette.setColor(QPalette.ColorRole.ToolTipText, QColor("#ffffff"))
-    palette.setColor(QPalette.ColorRole.Text, QColor("#0f172a"))
-    palette.setColor(QPalette.ColorRole.PlaceholderText, QColor("#94a3b8"))
-    palette.setColor(QPalette.ColorRole.Button, QColor("#ffffff"))
-    palette.setColor(QPalette.ColorRole.ButtonText, QColor("#0f172a"))
-    palette.setColor(QPalette.ColorRole.BrightText, QColor("#dc2626"))
-    palette.setColor(QPalette.ColorRole.Highlight, QColor("#2563eb"))
-    palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#ffffff"))
-
-    # Explicit Disabled palette roles to prevent OS dark mode bleed
-    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.WindowText, QColor("#94a3b8"))
-    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text, QColor("#94a3b8"))
-    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.ButtonText, QColor("#94a3b8"))
-    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Highlight, QColor("#e2e8f0"))
-    palette.setColor(
-        QPalette.ColorGroup.Disabled, QPalette.ColorRole.HighlightedText, QColor("#94a3b8")
-    )
-    app.setPalette(palette)
-
-    # Load custom QSS stylesheet
-    qss_path = os.path.join(os.path.dirname(__file__), "ui", "styles.qss")
-    if os.path.exists(qss_path):
-        with open(qss_path, encoding="utf-8") as f:
-            app.setStyleSheet(f.read())
+    # Load user preferences (defaults: language='ko', theme='dark')
+    settings = load_user_settings()
+    apply_language(str(settings.get("language", "ko")))
+    apply_theme(app, str(settings.get("theme", "dark")))
 
     # Create and show main window
     window = MainWindow()

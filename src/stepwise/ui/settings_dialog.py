@@ -30,7 +30,8 @@ from stepwise.core.app_paths import (
     save_user_settings,
     user_settings_directory,
 )
-from stepwise.ui.strings import Strings
+from stepwise.ui.strings import Strings, apply_language, get_current_language
+from stepwise.ui.theme import apply_theme, get_current_theme
 
 
 class SettingsDialog(QDialog):
@@ -39,7 +40,7 @@ class SettingsDialog(QDialog):
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Stepwise Settings")
-        self.resize(520, 440)
+        self.resize(520, 480)
 
         # Merge with persistent user settings
         current_saved = load_user_settings()
@@ -54,6 +55,22 @@ class SettingsDialog(QDialog):
         # Tab 1: General
         tab_gen = QWidget()
         layout_gen = QFormLayout(tab_gen)
+
+        self.cmb_lang = QComboBox()
+        self.cmb_lang.addItem("🇰🇷 한국어 (Korean)", "ko")
+        self.cmb_lang.addItem("🇺🇸 English", "en")
+        cur_lang = str(self._settings.get("language") or get_current_language())
+        self.cmb_lang.setCurrentIndex(0 if cur_lang.startswith("ko") else 1)
+        layout_gen.addRow("Language / 언어:", self.cmb_lang)
+
+        self.cmb_theme = QComboBox()
+        self.cmb_theme.addItem("🌙 Dark Mode (다크 모드)", "dark")
+        self.cmb_theme.addItem("☀️ Light Mode (라이트 모드)", "light")
+        cur_theme = str(self._settings.get("theme") or get_current_theme())
+        self.cmb_theme.setCurrentIndex(1 if cur_theme.startswith("light") else 0)
+        layout_gen.addRow("Theme / 테마:", self.cmb_theme)
+        self._initial_lang = cur_lang
+        self._initial_theme = cur_theme
 
         h_lib = QHBoxLayout()
         def_lib = self._settings.get("library_dir") or str(default_library_directory())
@@ -178,6 +195,8 @@ class SettingsDialog(QDialog):
 
     def _on_save(self) -> None:
         candidate = dict(self._settings)
+        candidate["language"] = str(self.cmb_lang.currentData() or "ko")
+        candidate["theme"] = str(self.cmb_theme.currentData() or "dark")
         candidate["library_dir"] = self.txt_lib_dir.text().strip()
         candidate["results_dir"] = self.txt_res_dir.text().strip()
         candidate["countdown_seconds"] = self.spin_countdown.value()
@@ -189,6 +208,14 @@ class SettingsDialog(QDialog):
             QMessageBox.warning(self, Strings.SAVE_ERROR_TITLE, Strings.SETTINGS_SAVE_FAILED)
             return
         self._settings = candidate
+        if str(candidate["language"]) != self._initial_lang:
+            apply_language(str(candidate["language"]))
+        if str(candidate["theme"]) != self._initial_theme:
+            from PySide6.QtWidgets import QApplication
+
+            app = QApplication.instance()
+            if app is not None:
+                apply_theme(app, str(candidate["theme"]))
         self.accept()
 
     def get_settings(self) -> dict[str, object]:

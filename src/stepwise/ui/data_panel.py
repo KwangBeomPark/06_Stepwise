@@ -3,6 +3,7 @@
 Features:
 - Excel (.xlsx) and CSV table viewer
 - Real-time row Status updates (Pending / Done / Failed / Interrupted / Skipped)
+- Canonical status code decoupling from localized display text
 - Row context menu (Retry, Skip, Mark as Done, Run only this row)
 - Header click emits variable placeholder for text input
 """
@@ -27,7 +28,8 @@ from PySide6.QtWidgets import (
 )
 
 from stepwise.services.data_source import read_data_file
-from stepwise.ui.strings import Strings
+from stepwise.ui.strings import Strings, format_status_display, normalize_status_code
+from stepwise.ui.theme import get_theme_tokens
 
 
 class DataPanel(QWidget):
@@ -42,6 +44,7 @@ class DataPanel(QWidget):
         self._headers: list[str] = []
         self._rows: list[dict[str, str]] = []
         self._row_numbers: list[int] = []
+        # Stores canonical status code ('Pending', 'Done', 'Failed', 'Running', 'Interrupted', 'Skipped')
         self._row_statuses: dict[int, str] = {}
 
         layout = QVBoxLayout(self)
@@ -54,7 +57,6 @@ class DataPanel(QWidget):
         self.btn_select_file.setToolTip(Strings.Tooltips.CHOOSE_DATA_FILE)
         self.btn_select_file.clicked.connect(self._on_choose_file)
         self.lbl_info = QLabel(Strings.NO_DATA)
-        self.lbl_info.setStyleSheet("color: #64748b; font-weight: 500;")
 
         top_layout.addWidget(self.btn_select_file)
         top_layout.addWidget(self.lbl_info)
@@ -66,8 +68,7 @@ class DataPanel(QWidget):
         self.chips_layout = QHBoxLayout(self.chips_widget)
         self.chips_layout.setContentsMargins(0, 2, 0, 2)
         self.chips_layout.setSpacing(6)
-        self.lbl_chips_title = QLabel("Insert Column Variable:")
-        self.lbl_chips_title.setStyleSheet("font-weight: bold; color: #475569;")
+        self.lbl_chips_title = QLabel(Strings.INSERT_VARIABLE_LABEL)
         self.chips_layout.addWidget(self.lbl_chips_title)
         self.chips_widget.hide()
         layout.addWidget(self.chips_widget)
@@ -80,10 +81,32 @@ class DataPanel(QWidget):
         self.table.horizontalHeader().sectionClicked.connect(self._on_header_clicked)
         layout.addWidget(self.table)
 
+        self._apply_theme_styles()
+
+    def _apply_theme_styles(self) -> None:
+        t = get_theme_tokens()
+        self.lbl_info.setStyleSheet(f"color: {t['text_muted']}; font-weight: 500;")
+        self.lbl_chips_title.setStyleSheet(f"font-weight: bold; color: {t['text_muted']};")
+
+    def retranslate_ui(self) -> None:
+        """Update labels, chips, and table status strings on language/theme switch."""
+        self.btn_select_file.setText(Strings.SELECT_DATA_FILE)
+        self.btn_select_file.setToolTip(Strings.Tooltips.CHOOSE_DATA_FILE)
+        self.lbl_chips_title.setText(Strings.INSERT_VARIABLE_LABEL)
+        self._apply_theme_styles()
+        if not self._current_filepath:
+            self.lbl_info.setText(Strings.NO_DATA)
+        else:
+            rows_str = Strings.ROWS_LOADED.format(count=len(self._rows))
+            self.lbl_info.setText(f"{os.path.basename(self._current_filepath)} ({rows_str})")
+        if self._headers:
+            self._rebuild_chips()
+            self._rebuild_table()
+
     def _on_choose_file(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self,
-            "Select Data File",
+            Strings.SELECT_DATA_FILE,
             "",
             "Data Files (*.xlsx *.csv);;Excel Files (*.xlsx);;CSV Files (*.csv)",
         )
@@ -102,14 +125,15 @@ class DataPanel(QWidget):
 
             self._rebuild_table()
             self._rebuild_chips()
-            self.lbl_info.setText(f"{os.path.basename(filepath)} ({len(rows)} rows)")
+            rows_str = Strings.ROWS_LOADED.format(count=len(rows))
+            self.lbl_info.setText(f"{os.path.basename(filepath)} ({rows_str})")
             self.data_loaded.emit(filepath, headers, rows, self._row_numbers)
         except Exception as e:
             self.lbl_info.setText(f"Error loading file: {e}")
 
     def _rebuild_chips(self) -> None:
         """Create clickable chip buttons for each column header."""
-        # Clear existing chips except the title label
+        t = get_theme_tokens()
         while self.chips_layout.count() > 1:
             item = self.chips_layout.takeAt(1)
             if item.widget():
@@ -118,14 +142,14 @@ class DataPanel(QWidget):
         for header in self._headers:
             btn = QPushButton(f"+ {{{header}}}")
             btn.setStyleSheet(
-                "background-color: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; "
-                "border-radius: 4px; padding: 2px 8px; font-weight: 500;"
+                f"background-color: {t['chip_bg']}; color: {t['chip_fg']}; "
+                f"border: 1px solid {t['chip_border']}; "
+                "border-radius: 4px; padding: 2px 8px; font-weight: 600;"
             )
             btn.setToolTip(
                 Strings.Tooltips.card(
-                    f"Insert {{{header}}}",
+                    f"{{{header}}}",
                     f"Click to insert {{{header}}} variable into the active text field.",
-                    tip="Stepwise substitutes this with each row's actual cell data.",
                 )
             )
             btn.clicked.connect(lambda _, h=header: self.insert_variable_requested.emit(f"{{{h}}}"))
@@ -146,10 +170,12 @@ class DataPanel(QWidget):
             # Col 0: Row number
             self.table.setItem(idx, 0, QTableWidgetItem(str(r_num)))
 
-            # Col 1: Status
-            status_text = self._row_statuses.get(r_num, Strings.STATUS_PENDING)
-            item_status = QTableWidgetItem(status_text)
-            self._apply_status_style(item_status, status_text)
+            # Col 1: Status (display localized label, style by canonical status code)
+            canonical_status = self._row_statuses.get(r_num, "Pending")
+            display_text = format_status_display(canonical_status)
+            item_status = QTableWidgetItem(display_text)
+            item_status.setData(Qt.ItemDataRole.UserRole, canonical_status)
+            self._apply_status_style(item_status, canonical_status)
             self.table.setItem(idx, 1, item_status)
 
             # Rest of data columns
@@ -161,28 +187,32 @@ class DataPanel(QWidget):
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
 
     def update_row_status(self, row_number: int, status: str) -> None:
-        """Update live status for a row."""
-        self._row_statuses[row_number] = status
-        # Find table row
+        """Update live status for a row using canonical status code while showing localized text."""
+        canonical = normalize_status_code(status)
+        self._row_statuses[row_number] = canonical
+        display_text = format_status_display(canonical)
         for idx, r_num in enumerate(self._row_numbers):
             if r_num == row_number:
                 item = self.table.item(idx, 1)
                 if item:
-                    item.setText(status)
-                    self._apply_status_style(item, status)
+                    item.setText(display_text)
+                    item.setData(Qt.ItemDataRole.UserRole, canonical)
+                    self._apply_status_style(item, canonical)
                 break
 
     def _apply_status_style(self, item: QTableWidgetItem, status: str) -> None:
-        if status == Strings.STATUS_DONE or "Done" in status:
-            item.setForeground(QColor("#16a34a"))  # Green
-        elif status == Strings.STATUS_FAILED or "Failed" in status:
-            item.setForeground(QColor("#dc2626"))  # Red
-        elif status == Strings.STATUS_RUNNING or "Running" in status:
-            item.setForeground(QColor("#2563eb"))  # Blue
-        elif status == Strings.STATUS_INTERRUPTED or "Interrupted" in status:
-            item.setForeground(QColor("#d97706"))  # Amber
+        t = get_theme_tokens()
+        canonical = normalize_status_code(status)
+        if canonical == "Done":
+            item.setForeground(QColor(t["status_ok"]))
+        elif canonical == "Failed":
+            item.setForeground(QColor(t["status_fail"]))
+        elif canonical == "Running":
+            item.setForeground(QColor(t["status_run"]))
+        elif canonical == "Interrupted":
+            item.setForeground(QColor(t["status_warn"]))
         else:
-            item.setForeground(QColor("#64748b"))  # Gray
+            item.setForeground(QColor(t["text_muted"]))
 
     def _on_header_clicked(self, logical_index: int) -> None:
         if logical_index >= 2:
@@ -205,13 +235,13 @@ class DataPanel(QWidget):
 
         action = menu.exec(self.table.mapToGlobal(pos))
         if action == act_retry:
-            self.update_row_status(row_num, Strings.STATUS_PENDING)
+            self.update_row_status(row_num, "Pending")
             self.row_status_override.emit(row_num, "Pending")
         elif action == act_skip:
-            self.update_row_status(row_num, Strings.STATUS_SKIPPED)
+            self.update_row_status(row_num, "Skipped")
             self.row_status_override.emit(row_num, "Skipped")
         elif action == act_done:
-            self.update_row_status(row_num, Strings.STATUS_DONE)
+            self.update_row_status(row_num, "Done")
             self.row_status_override.emit(row_num, "Done")
         elif action == act_run_only:
             self.run_only_row_requested.emit(row_num)
