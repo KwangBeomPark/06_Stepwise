@@ -146,6 +146,29 @@ class SettingsDialog(QDialog):
         lbl_about.setTextFormat(Qt.RichText)
         layout_about.addWidget(lbl_about)
 
+        # Update Check Section
+        from PySide6.QtWidgets import QCheckBox, QGroupBox
+        box_update = QGroupBox("Auto-Update (GitHub Releases)")
+        layout_update = QVBoxLayout(box_update)
+        layout_update.setSpacing(8)
+
+        self.chk_auto_update = QCheckBox(Strings.UPDATE_AUTO_CHECK_LABEL)
+        self.chk_auto_update.setChecked(bool(self._settings.get("auto_check_updates", True)))
+        layout_update.addWidget(self.chk_auto_update)
+
+        h_check_line = QHBoxLayout()
+        self.lbl_update_status = QLabel("")
+        self.lbl_update_status.setStyleSheet("font-size: 12px; color: #94a3b8;")
+        self._refresh_last_check_label()
+        h_check_line.addWidget(self.lbl_update_status, stretch=1)
+
+        self.btn_check_now = QPushButton(f"🔄 {Strings.UPDATE_CHECK_NOW}")
+        self.btn_check_now.clicked.connect(self._on_check_now_clicked)
+        h_check_line.addWidget(self.btn_check_now)
+        layout_update.addLayout(h_check_line)
+
+        layout_about.addWidget(box_update)
+
         h_about_btns = QHBoxLayout()
         btn_user_setting = QPushButton(Strings.OPEN_SETTINGS_FOLDER)
         btn_user_setting.clicked.connect(self._open_user_settings)
@@ -179,6 +202,54 @@ class SettingsDialog(QDialog):
         if d:
             line_edit.setText(d)
 
+    def _refresh_last_check_label(self) -> None:
+        from datetime import datetime
+
+        from stepwise.core.app_paths import load_updater_state
+
+        state = load_updater_state()
+        last_check = state.get("last_check_utc")
+        if last_check:
+            dt_str = datetime.fromtimestamp(last_check).strftime("%Y-%m-%d %H:%M")
+            self.lbl_update_status.setText(Strings.UPDATE_LAST_CHECKED.format(time=dt_str))
+        else:
+            self.lbl_update_status.setText(Strings.UPDATE_LAST_CHECKED.format(time=Strings.UPDATE_NEVER_CHECKED))
+
+    def _on_check_now_clicked(self) -> None:
+        from PySide6.QtWidgets import QApplication
+
+        from stepwise.services.updater import RateLimitError, fetch_latest_release
+        from stepwise.ui.update_dialog import UpdateDialog
+
+        self.btn_check_now.setEnabled(False)
+        self.lbl_update_status.setText(Strings.UPDATE_CHECKING)
+        QApplication.processEvents()
+
+        try:
+            release_info, status = fetch_latest_release(force=True)
+            self._refresh_last_check_label()
+            if status == "update_available" and release_info:
+                dlg = UpdateDialog(release_info, parent=self)
+                dlg.exec()
+            elif status == "up_to_date":
+                QMessageBox.information(
+                    self,
+                    Strings.UPDATE_UP_TO_DATE_TITLE,
+                    Strings.UPDATE_UP_TO_DATE_MSG.format(version=__version__),
+                )
+            else:
+                QMessageBox.information(
+                    self,
+                    Strings.UPDATE_UP_TO_DATE_TITLE,
+                    f"Check complete: {status}",
+                )
+        except RateLimitError:
+            QMessageBox.warning(self, "GitHub Rate Limit", Strings.UPDATE_RATE_LIMITED)
+        except Exception as exc:
+            QMessageBox.warning(self, "Update Check Failed", str(exc))
+        finally:
+            self.btn_check_now.setEnabled(True)
+
     def _open_user_settings(self) -> None:
         u_dir = str(user_settings_directory())
         try:
@@ -202,6 +273,7 @@ class SettingsDialog(QDialog):
         candidate["countdown_seconds"] = self.spin_countdown.value()
         candidate["default_wait_before"] = self.spin_wait_before.value()
         candidate["poll_interval"] = self.spin_poll.value()
+        candidate["auto_check_updates"] = bool(self.chk_auto_update.isChecked())
         try:
             save_user_settings(candidate)
         except OSError:

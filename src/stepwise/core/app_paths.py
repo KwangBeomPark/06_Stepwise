@@ -27,6 +27,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "image_confidence": 0.95,
     "language": "ko",
     "theme": "dark",
+    "auto_check_updates": True,
     "window_geometry": None,
     "splitter_state": None,
 }
@@ -44,6 +45,63 @@ def local_appdata_directory() -> Path:
 def installation_directory() -> Path:
     """Return the standard installation directory in Programs."""
     return local_appdata_directory() / "Programs" / APPLICATION_NAME
+
+
+def updates_directory() -> Path:
+    """Return the dedicated directory for downloaded update installers and parts."""
+    base = local_appdata_directory() / APPLICATION_NAME / "Updates"
+    base.mkdir(parents=True, exist_ok=True)
+    return base
+
+
+def updater_state_path() -> Path:
+    """Return path to updater_state.json storing ETags, cooldowns, and check history."""
+    return updates_directory() / "updater_state.json"
+
+
+def load_updater_state() -> dict[str, Any]:
+    """Load updater state safely from updater_state.json."""
+    p = updater_state_path()
+    if not p.is_file():
+        return {}
+    try:
+        with open(p, encoding="utf-8") as f:
+            data = json.load(f)
+            return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def save_updater_state(state: dict[str, Any]) -> None:
+    """Atomically save updater state to updater_state.json."""
+    p = updater_state_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    temp_fd, temp_path = tempfile.mkstemp(prefix="updater_state_", suffix=".tmp", dir=str(p.parent))
+    try:
+        with os.fdopen(temp_fd, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temp_path, p)
+    except Exception:
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
+
+
+def is_installed_build() -> bool:
+    """Check if Stepwise is running as an installed frozen build in Program folder."""
+    if not getattr(sys, "frozen", False):
+        return False
+    try:
+        exe_path = Path(sys.executable).resolve()
+        inst_path = installation_directory().resolve()
+        return exe_path.is_relative_to(inst_path)
+    except Exception:
+        return False
+
 
 
 def user_settings_directory() -> Path:

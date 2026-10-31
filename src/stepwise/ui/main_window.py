@@ -152,7 +152,13 @@ class MainWindow(QMainWindow):
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
 
+        # Check for updates in background 15s after launch if enabled
+        if self._user_settings.get("auto_check_updates", True):
+            QTimer.singleShot(15000, self._check_updates_background)
+
     def _setup_ui(self) -> None:
+        self._setup_menu_bar()
+
         # Toolbar
         self.toolbar = QToolBar("Main Controls")
         self.toolbar.setMovable(False)
@@ -863,6 +869,7 @@ class MainWindow(QMainWindow):
         self.action_tree.retranslate_ui()
         self.data_panel.retranslate_ui()
         self.prop_panel.retranslate_ui()
+        self._setup_menu_bar()
 
     def _open_scheduler(self) -> None:
         if self._is_running:
@@ -1197,3 +1204,115 @@ class MainWindow(QMainWindow):
             self._package_temp.cleanup()
             self._package_temp = None
         super().closeEvent(event)
+
+    def _setup_menu_bar(self) -> None:
+        """Setup application menu bar."""
+        menubar = self.menuBar()
+        menubar.clear()
+
+        cur_lang = get_current_language()
+
+        # Help Menu
+        help_title = "도움말 (&H)" if cur_lang == "ko" else "&Help"
+        menu_help = menubar.addMenu(help_title)
+
+        act_update = menu_help.addAction(Strings.UPDATE_CHECK_MENU)
+        act_update.triggered.connect(self._check_updates_interactive)
+
+        menu_help.addSeparator()
+
+        act_settings = menu_help.addAction(Strings.OPEN_SETTINGS_FOLDER)
+        act_settings.triggered.connect(self._open_settings_folder)
+
+        act_results = menu_help.addAction(Strings.OPEN_RESULTS_FOLDER)
+        act_results.triggered.connect(self._open_results_folder)
+
+        menu_help.addSeparator()
+
+        act_about = menu_help.addAction(
+            "Stepwise 정보 (&A)..." if cur_lang == "ko" else "&About Stepwise..."
+        )
+        act_about.triggered.connect(self._open_settings)
+
+    def _open_settings_folder(self) -> None:
+        from stepwise.core.app_paths import user_settings_directory
+        try:
+            os.startfile(str(user_settings_directory()))
+        except Exception:
+            QMessageBox.warning(self, Strings.SAVE_ERROR_TITLE, Strings.FOLDER_OPEN_FAILED)
+
+    def _open_results_folder(self) -> None:
+        try:
+            os.startfile(str(self._results_dir))
+        except Exception:
+            QMessageBox.warning(self, Strings.SAVE_ERROR_TITLE, Strings.FOLDER_OPEN_FAILED)
+
+    def _check_updates_interactive(self) -> None:
+        """User manually initiated update check via menu."""
+        from stepwise import __version__
+        from stepwise.services.updater import RateLimitError, fetch_latest_release
+        from stepwise.ui.update_dialog import UpdateDialog
+
+        try:
+            release_info, status = fetch_latest_release(force=True)
+            if status == "update_available" and release_info:
+                dlg = UpdateDialog(
+                    release_info,
+                    is_macro_running=self._is_running,
+                    is_scheduler_armed=False,
+                    parent=self,
+                )
+                dlg.exec()
+            elif status == "up_to_date":
+                QMessageBox.information(
+                    self,
+                    Strings.UPDATE_UP_TO_DATE_TITLE,
+                    Strings.UPDATE_UP_TO_DATE_MSG.format(version=__version__),
+                )
+            else:
+                QMessageBox.information(
+                    self,
+                    Strings.UPDATE_UP_TO_DATE_TITLE,
+                    f"Check completed: {status}",
+                )
+        except RateLimitError:
+            QMessageBox.warning(self, "GitHub Rate Limit", Strings.UPDATE_RATE_LIMITED)
+        except Exception as exc:
+            QMessageBox.warning(self, "Update Check Failed", str(exc))
+
+    def _check_updates_background(self) -> None:
+        """Silent background update check 15s after startup."""
+        if self._is_running:
+            return
+
+        def _bg_check() -> None:
+            try:
+                from stepwise.services.updater import fetch_latest_release
+
+                release_info, status = fetch_latest_release(force=False)
+                if status == "update_available" and release_info:
+                    # Notify UI thread
+                    QTimer.singleShot(
+                        0,
+                        lambda: self._show_update_available(release_info),
+                    )
+            except Exception:
+                # Background check fails silently
+                pass
+
+        threading.Thread(target=_bg_check, daemon=True).start()
+
+    def _show_update_available(self, release_info: Any) -> None:
+        """Show non-modal update dialog when new release is discovered in background."""
+        if self._is_running:
+            return
+        from stepwise.ui.update_dialog import UpdateDialog
+
+        dlg = UpdateDialog(
+            release_info,
+            is_macro_running=self._is_running,
+            is_scheduler_armed=False,
+            parent=self,
+        )
+        dlg.show()
+

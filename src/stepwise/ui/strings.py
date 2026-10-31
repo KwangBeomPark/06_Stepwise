@@ -267,6 +267,30 @@ class Strings:
     )
     STATUS_READY = "Ready"
 
+    # Auto-Update
+    UPDATE_CHECK_MENU = "Check for Updates..."
+    UPDATE_AUTO_CHECK_LABEL = "Check for updates automatically on startup"
+    UPDATE_LAST_CHECKED = "Last checked: {time}"
+    UPDATE_NEVER_CHECKED = "Never"
+    UPDATE_CHECK_NOW = "Check Now"
+    UPDATE_CHECKING = "Checking for updates..."
+    UPDATE_UP_TO_DATE_TITLE = "Up to Date"
+    UPDATE_UP_TO_DATE_MSG = "Stepwise is up to date (v{version})."
+    UPDATE_AVAILABLE_TITLE = "Update Available"
+    UPDATE_AVAILABLE_MSG = "A new version of Stepwise (v{version}) is available."
+    UPDATE_DOWNLOAD_BTN = "Download Update"
+    UPDATE_DOWNLOADING = "Downloading... {progress}% ({speed})"
+    UPDATE_VERIFYING = "Verifying Authenticode signature and integrity..."
+    UPDATE_READY_INSTALL_BTN = "Install and Restart"
+    UPDATE_LATER_BTN = "Later"
+    UPDATE_VIEW_RELEASE = "View on GitHub"
+    UPDATE_BLOCKED_RUNNING = "Cannot install while macro is running. Stop macro first."
+    UPDATE_BLOCKED_ARMED = "Cannot install while night scheduler is armed. Disarm scheduler first."
+    UPDATE_VERIFY_FAILED = "Verification failed: {error}"
+    UPDATE_DOWNLOAD_FAILED = "Download failed: {error}"
+    UPDATE_RATE_LIMITED = "GitHub rate limit exceeded. Please try again later."
+    UPDATE_DEV_MODE_NOTICE = "Running in development or portable mode. Direct in-place install is disabled; download the installer from GitHub."
+
     # Dialogs & Prompts
     CONFIRM_DELETE = "Are you sure you want to delete this action?"
     CONFIRM_DISCARD_CHANGES = "You have unsaved changes. Discard them?"
@@ -674,6 +698,28 @@ _KO_STRINGS: dict[str, str] = {
     "SCREEN_MATCH": "화면 {w}x{h} @{scale}% ✅ 매크로 기준과 일치",
     "SCREEN_MISMATCH": "화면 {w}x{h} @{scale}% ⚠ 매크로 기록 환경({rec_w}x{rec_h} @{rec_scale}%)과 다름",
     "STATUS_READY": "준비 완료",
+    "UPDATE_CHECK_MENU": "업데이트 확인...",
+    "UPDATE_AUTO_CHECK_LABEL": "시작 시 업데이트 자동 확인",
+    "UPDATE_LAST_CHECKED": "마지막 확인: {time}",
+    "UPDATE_NEVER_CHECKED": "확인한 적 없음",
+    "UPDATE_CHECK_NOW": "지금 확인",
+    "UPDATE_CHECKING": "업데이트 확인 중...",
+    "UPDATE_UP_TO_DATE_TITLE": "최신 버전",
+    "UPDATE_UP_TO_DATE_MSG": "현재 최신 버전(v{version})을 사용 중입니다.",
+    "UPDATE_AVAILABLE_TITLE": "새 버전 업데이트",
+    "UPDATE_AVAILABLE_MSG": "Stepwise 새 버전(v{version})이 출시되었습니다.",
+    "UPDATE_DOWNLOAD_BTN": "업데이트 다운로드",
+    "UPDATE_DOWNLOADING": "다운로드 중... {progress}% ({speed})",
+    "UPDATE_VERIFYING": "디지털 서명 및 무결성 검증 중...",
+    "UPDATE_READY_INSTALL_BTN": "지금 설치 및 재시작",
+    "UPDATE_LATER_BTN": "나중에",
+    "UPDATE_VIEW_RELEASE": "GitHub 릴리즈 보기",
+    "UPDATE_BLOCKED_RUNNING": "매크로가 실행 중일 때는 업데이트를 설치할 수 없습니다. 매크로를 먼저 중지하세요.",
+    "UPDATE_BLOCKED_ARMED": "야간 예약 실행(Armed 모드) 대기 중에는 업데이트를 설치할 수 없습니다. 예약을 먼저 해제하세요.",
+    "UPDATE_VERIFY_FAILED": "무결성/디지털 서명 검증 실패: {error}",
+    "UPDATE_DOWNLOAD_FAILED": "다운로드 실패: {error}",
+    "UPDATE_RATE_LIMITED": "GitHub API 요청 한도를 초과했습니다. 잠시 후 다시 시도해 주세요.",
+    "UPDATE_DEV_MODE_NOTICE": "소스코드 또는 포터블 모드로 실행 중입니다. git pull 또는 GitHub에서 인스톨러를 다운로드하여 업데이트하세요.",
     "CONFIRM_DELETE": "선택한 동작을 삭제하시겠습니까?",
     "CONFIRM_DISCARD_CHANGES": "저장하지 않은 변경 사항이 있습니다. 변경 사항을 버리시겠습니까?",
     "RECOVERY_FOUND_TITLE": "자동 복구 가능",
