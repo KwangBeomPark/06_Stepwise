@@ -1,18 +1,40 @@
 # Explicit signing of a clean provenance-checked build; publishing is opt-in.
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory=$true)][string]$BuildRoot,
+    [string]$BuildRoot,
     [string]$SignToolPath = $env:SIGNTOOL_PATH,
+    [ValidateSet('x64','x86','arm64')][string]$SignToolArchitecture = 'x64',
     [string]$CertificateThumbprint = $env:STEPWISE_SIGNING_THUMBPRINT,
     [string]$InnoCompilerPath,
+    [switch]$Diagnose,
     [switch]$Publish
 )
 $ErrorActionPreference = 'Stop'
 $projectRoot = (Resolve-Path "$PSScriptRoot\..").Path
 Set-Location -LiteralPath $projectRoot
 . "$PSScriptRoot\release_helpers.ps1"
+function Get-SuiteToolArchitecture([string]$Path) {
+    # Read the PE header: the host PowerShell bitness does not determine SignTool bitness.
+    if ([IO.Path]::GetExtension($Path) -eq '.ps1') { return 'script' }
+    $stream = [IO.File]::OpenRead($Path)
+    $reader = New-Object IO.BinaryReader($stream)
+    try {
+        if ($reader.ReadUInt16() -ne 0x5a4d) { throw "Not a PE executable: $Path" }
+        $stream.Position = 0x3c
+        $offset = $reader.ReadInt32()
+        if ($offset -lt 0 -or $offset -gt ($stream.Length - 6)) { throw "Invalid PE header: $Path" }
+        $stream.Position = $offset
+        if ($reader.ReadUInt32() -ne 0x4550) { throw "Invalid PE signature: $Path" }
+        switch ($reader.ReadUInt16()) {
+            0x8664 { return 'x64' }
+            0x014c { return 'x86' }
+            0xaa64 { return 'arm64' }
+            default { throw "Unsupported PE architecture: $Path" }
+        }
+    } finally { $reader.Dispose() }
+}
 function Find-SuiteSignTool {
-    param([string]$RequestedPath)
+    param([string]$RequestedPath, [string]$Architecture = 'x64')
     if ($RequestedPath) {
         if (-not (Test-Path -LiteralPath $RequestedPath -PathType Leaf)) {
             throw 'The specified SignTool path does not exist.'
@@ -20,9 +42,7 @@ function Find-SuiteSignTool {
         return (Resolve-Path -LiteralPath $RequestedPath).Path
     }
     $candidates = @()
-    $onPath = Get-Command signtool.exe -ErrorAction SilentlyContinue
-    if ($onPath) { $candidates += $onPath.Source }
-    $candidates += Join-Path $projectRoot 'tools\signtool\signtool.exe'
+    # Prefer an intact SDK installation to an arbitrary PATH entry or copied tool.
     foreach ($sdkRoot in @(${env:ProgramFiles(x86)}, $env:ProgramFiles)) {
         if (-not $sdkRoot) { continue }
         $sdkBin = Join-Path $sdkRoot 'Windows Kits\10\bin'
@@ -30,17 +50,53 @@ function Find-SuiteSignTool {
             Where-Object { $_.Name -match '^\d+\.\d+\.\d+\.\d+$' } |
             Sort-Object { [version]$_.Name } -Descending)
         foreach ($directory in $versions) {
-            $candidates += Join-Path $directory.FullName 'x64\signtool.exe'
+            $candidates += Join-Path $directory.FullName "$Architecture\signtool.exe"
         }
-        $candidates += Join-Path $sdkBin 'x64\signtool.exe'
+        $candidates += Join-Path $sdkBin "$Architecture\signtool.exe"
     }
+    $candidates += Join-Path $projectRoot 'tools\signtool\signtool.exe'
+    $onPath = Get-Command signtool.exe -ErrorAction SilentlyContinue
+    if ($onPath) { $candidates += $onPath.Source }
     foreach ($candidate in $candidates) {
         if ($candidate -and (Test-Path -LiteralPath $candidate -PathType Leaf)) {
-            return (Resolve-Path -LiteralPath $candidate).Path
+            if ((Get-SuiteToolArchitecture $candidate) -eq $Architecture) {
+                return (Resolve-Path -LiteralPath $candidate).Path
+            }
         }
     }
-    throw 'Provide -SignToolPath, SIGNTOOL_PATH, SignTool on PATH, or install the Windows SDK.'
+    throw "No $Architecture SignTool found. Provide -SignToolPath / SIGNTOOL_PATH or install the Windows SDK with signing tools."
 }
+function Write-SuiteSignToolInfo([string]$Path) {
+    $architecture = Get-SuiteToolArchitecture $Path
+    $version = (Get-Item -LiteralPath $Path).VersionInfo.ProductVersion
+    Write-Host "SignTool: $Path"
+    Write-Host "SignTool architecture: $architecture; product version: $version; PowerShell 64-bit: $([Environment]::Is64BitProcess)"
+    Write-Host 'Certificate store: CurrentUser\My (no /sm). HasPrivateKey is metadata, not proof of usable key access.'
+}
+if ($Diagnose) {
+    if (-not $CertificateThumbprint) { throw 'Provide -CertificateThumbprint or STEPWISE_SIGNING_THUMBPRINT.' }
+    try {
+        $diagnosticTool = Find-SuiteSignTool -RequestedPath $SignToolPath -Architecture $SignToolArchitecture
+        Write-SuiteSignToolInfo $diagnosticTool
+    } catch { Write-Warning $_.Exception.Message }
+    # Silent diagnostics only: no store repair, signing, build, or publication.
+    $certutilPaths = @("$env:windir\System32\certutil.exe")
+    if ([Environment]::Is64BitOperatingSystem) {
+        if (-not [Environment]::Is64BitProcess) { $certutilPaths[0] = "$env:windir\Sysnative\certutil.exe" }
+        $certutilPaths += "$env:windir\SysWOW64\certutil.exe"
+    }
+    foreach ($certutil in $certutilPaths) {
+        Write-Host "=== Certificate/key association: $certutil ==="
+        & $certutil -silent -user -v -store My $CertificateThumbprint
+        Write-Host "certutil store exit code: $LASTEXITCODE (inspect key verification messages even when zero)"
+        Write-Host "=== Registered providers: $certutil ==="
+        & $certutil -silent -csplist
+        Write-Host "certutil csplist exit code: $LASTEXITCODE (an unrelated provider can also fail)"
+    }
+    Write-Host 'Diagnostics complete; key signability has not been tested. See docs/SIGNING_TROUBLESHOOTING.md.'
+    return
+}
+if (-not $BuildRoot) { throw 'Provide -BuildRoot for signing, or use -Diagnose for read-only diagnostics.' }
 $Version = ([regex]::Match((Get-Content pyproject.toml -Raw), '(?m)^version\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)"')).Groups[1].Value
 if (-not $Version) { throw 'A valid project version is required.' }
 $Commit = & git rev-parse HEAD
@@ -61,7 +117,8 @@ if ((Get-FileHash -LiteralPath "$BuildRoot\test-results.txt" -Algorithm SHA256).
 $unsignedBundle = Join-Path $BuildRoot 'dist\Stepwise'
 Assert-BundleInventory $unsignedBundle $inputManifest.bundle
 if (-not $CertificateThumbprint) { throw 'Provide -CertificateThumbprint or STEPWISE_SIGNING_THUMBPRINT.' }
-$signtool = Find-SuiteSignTool -RequestedPath $SignToolPath
+$signtool = Find-SuiteSignTool -RequestedPath $SignToolPath -Architecture $SignToolArchitecture
+Write-SuiteSignToolInfo $signtool
 $cert = Get-Item "Cert:\CurrentUser\My\$CertificateThumbprint" -ErrorAction Stop
 if (-not $cert.HasPrivateKey) { throw 'Signing certificate has no available private key.' }
 if ($cert.NotAfter -lt (Get-Date)) { throw 'Signing certificate expired.' }
@@ -85,8 +142,10 @@ $stage = Join-Path $runRoot 'artifacts'
 Copy-Item -LiteralPath $unsignedBundle -Destination $bundle -Recurse
 Assert-BundleInventory $bundle $inputManifest.bundle
 function Invoke-SignBinary([string]$Path) {
-    & $signtool sign /sha1 $CertificateThumbprint /fd sha256 /tr http://timestamp.digicert.com /td sha256 $Path
-    if ($LASTEXITCODE -ne 0) { throw "Signing failed: $(Split-Path -Leaf $Path). Official release files were not changed." }
+    & $signtool sign /v /debug /s My /sha1 $CertificateThumbprint /fd sha256 /tr http://timestamp.digicert.com /td sha256 $Path
+    if ($LASTEXITCODE -ne 0) {
+        throw "Signing failed: $(Split-Path -Leaf $Path) (exit $LASTEXITCODE; tool: $signtool). Official release files were not changed. Run scripts\sign.ps1 -Diagnose -CertificateThumbprint $CertificateThumbprint and inspect provider/key association and architecture. See docs/SIGNING_TROUBLESHOOTING.md."
+    }
     Assert-ReleaseSignature $Path $CertificateThumbprint
 }
 # Only the explicitly invoked signing pipeline accesses the user's signing session.

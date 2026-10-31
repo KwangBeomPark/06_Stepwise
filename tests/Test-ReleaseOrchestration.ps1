@@ -7,6 +7,7 @@ $originalLocation = Get-Location
 $script:checks = 0
 $global:fixtureSignCalls = @()
 $global:fixtureFailInstaller = $false
+$global:fixtureFailSigner = $false
 function Assert-True($Condition, [string]$Message) { if (-not $Condition) { throw $Message }; $script:checks++ }
 function git {
     if ($args[0] -eq 'rev-parse') { $global:LASTEXITCODE = 0; return 'fixture-commit' }
@@ -44,7 +45,11 @@ try {
     })
     $signer = @'
 $path = $args[-1]
+if ('/sm' -in $args -or '/debug' -notin $args -or '/v' -notin $args) { throw 'Incorrect signing diagnostics/store options.' }
+$storeIndex = [Array]::IndexOf($args, '/s')
+if ($storeIndex -lt 0 -or $args[$storeIndex + 1] -ne 'My') { throw 'Expected explicit user My store.' }
 $global:fixtureSignCalls += Split-Path -Leaf $path
+if ($global:fixtureFailSigner) { $global:LASTEXITCODE = 1; return }
 [IO.File]::AppendAllText($path, '|signed')
 $global:LASTEXITCODE = 0
 '@
@@ -70,6 +75,15 @@ $global:LASTEXITCODE = 0
     Assert-True ([IO.File]::ReadAllText("$release\old-official.exe") -eq 'protected old release') 'Old official artifact modified.'
     Assert-True ([IO.File]::ReadAllText("$release\build-manifest.json") -eq 'protected old metadata') 'Old generic metadata modified.'
     $beforeFailure = @(Get-BundleInventory $release)
+    $global:fixtureFailSigner = $true
+    $failed = $false
+    try { & "$fixture\scripts\sign.ps1" -BuildRoot $build -SignToolPath "$fixture\signer.ps1" -CertificateThumbprint 'fixture-thumbprint' -InnoCompilerPath "$fixture\compiler.ps1" }
+    catch { $failed = $_.Exception.Message -like '*Official release files were not changed*Diagnose*' }
+    Assert-True $failed 'Signer failure did not supply actionable diagnostics.'
+    Assert-BundleInventory $release $beforeFailure
+    $script:checks++
+    Assert-True ([IO.File]::ReadAllText("$build\dist\Stepwise\Stepwise.exe") -eq 'fixture unsigned app') 'Signing failure modified unsigned input.'
+    $global:fixtureFailSigner = $false
     $global:fixtureFailInstaller = $true
     $failed = $false
     try { & "$fixture\scripts\sign.ps1" -BuildRoot $build -SignToolPath "$fixture\signer.ps1" -CertificateThumbprint 'fixture-thumbprint' -InnoCompilerPath "$fixture\compiler.ps1" } catch { $failed=$true }
@@ -102,5 +116,5 @@ $global:LASTEXITCODE = 0
     $temp = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'
     if (-not $absolute.StartsWith($temp,[StringComparison]::OrdinalIgnoreCase) -or (Split-Path -Leaf $absolute) -notlike 'stepwise-orchestration-*') { throw 'Unsafe fixture cleanup target.' }
     Remove-Item -LiteralPath $absolute -Recurse -Force
-    Remove-Variable fixtureSignCalls,fixtureFailInstaller -Scope Global -ErrorAction SilentlyContinue
+    Remove-Variable fixtureSignCalls,fixtureFailInstaller,fixtureFailSigner -Scope Global -ErrorAction SilentlyContinue
 }

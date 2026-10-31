@@ -9,10 +9,10 @@ $ast = [Management.Automation.Language.Parser]::ParseFile(
 if ($parseErrors.Count) { throw "Signing script has syntax errors: $parseErrors" }
 $definition = $ast.FindAll({
     param($node)
-    $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Find-SuiteSignTool'
+    $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -in @('Get-SuiteToolArchitecture','Find-SuiteSignTool')
 }, $true)
-if (@($definition).Count -ne 1) { throw 'Expected exactly one signing-tool discovery function.' }
-Invoke-Expression $definition[0].Extent.Text
+if (@($definition).Count -ne 2) { throw 'Expected architecture and discovery functions.' }
+foreach ($function in $definition) { Invoke-Expression $function.Extent.Text }
 
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) ('suite-discovery-' + [guid]::NewGuid().ToString('N'))
 $projectRoot = Join-Path $testRoot 'app'
@@ -28,9 +28,14 @@ function Assert-Discovery([string]$Actual, [string]$Expected) {
     if ($Actual -ne $Expected) { throw "Discovery mismatch: $Actual / $Expected" }
     $script:assertions++
 }
-function New-ToolStub([string]$Path) {
+function New-ToolStub([string]$Path, [uint16]$Machine = 0x8664) {
     [IO.Directory]::CreateDirectory((Split-Path -Parent $Path)) | Out-Null
-    [IO.File]::WriteAllText($Path, 'Not executed: discovery fixture')
+    $bytes = New-Object byte[] 128
+    [Array]::Copy([BitConverter]::GetBytes([uint16]0x5a4d), 0, $bytes, 0, 2)
+    [Array]::Copy([BitConverter]::GetBytes([int]64), 0, $bytes, 60, 4)
+    [Array]::Copy([BitConverter]::GetBytes([uint32]0x4550), 0, $bytes, 64, 4)
+    [Array]::Copy([BitConverter]::GetBytes($Machine), 0, $bytes, 68, 2)
+    [IO.File]::WriteAllBytes($Path, $bytes)
     return (Resolve-Path -LiteralPath $Path).Path
 }
 try {
@@ -54,7 +59,28 @@ try {
     Assert-Discovery (Find-SuiteSignTool) $newer
 
     $local = New-ToolStub (Join-Path $projectRoot 'tools\signtool\signtool.exe')
+    $script:stubCommand = [pscustomobject]@{ Source = $explicit }
+    Assert-Discovery (Find-SuiteSignTool) $newer
+    $x86 = New-ToolStub (Join-Path $env:ProgramFiles 'Windows Kits\10\bin\10.0.10.0\x86\signtool.exe') 0x014c
+    Assert-Discovery (Find-SuiteSignTool -Architecture x86) $x86
+    Assert-Discovery (Get-SuiteToolArchitecture $x86) 'x86'
+    $arm = New-ToolStub (Join-Path $testRoot 'arm64\signtool.exe') 0xaa64
+    Assert-Discovery (Get-SuiteToolArchitecture $arm) 'arm64'
+    Remove-Item -LiteralPath $newer,$older
     Assert-Discovery (Find-SuiteSignTool) $local
+    New-ToolStub $local 0x014c | Out-Null
+    Assert-Discovery (Find-SuiteSignTool) $explicit
+    $script:stubCommand = [pscustomobject]@{ Source = $local }
+    $failed = $false
+    try { Find-SuiteSignTool | Out-Null } catch { $failed = $true }
+    if (-not $failed) { throw 'Automatic x64 discovery accepted an x86 tool.' }
+    $assertions++
+    Assert-Discovery (Find-SuiteSignTool -RequestedPath $local) $local
+    [IO.File]::WriteAllText($local, 'Invalid PE')
+    $failed = $false
+    try { Get-SuiteToolArchitecture $local | Out-Null } catch { $failed = $true }
+    if (-not $failed) { throw 'Invalid executable accepted.' }
+    $assertions++
     Write-Output ("PASS: {0} discovery assertions; no signing or service changes." -f $assertions)
 }
 finally {
@@ -68,4 +94,3 @@ finally {
     }
     Remove-Item -LiteralPath $resolved -Recurse -Force
 }
-
