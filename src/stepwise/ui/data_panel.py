@@ -186,6 +186,14 @@ class DataPanel(QWidget):
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
 
+    def get_failed_row_numbers(self) -> list[int]:
+        """Return list of row numbers whose current canonical status is 'Failed'."""
+        return [
+            r_num
+            for r_num, status in self._row_statuses.items()
+            if normalize_status_code(status) == "Failed"
+        ]
+
     def update_row_status(self, row_number: int, status: str) -> None:
         """Update live status for a row using canonical status code while showing localized text."""
         canonical = normalize_status_code(status)

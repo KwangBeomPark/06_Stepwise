@@ -10,6 +10,8 @@ Provides dynamic, type-specific property editors with:
 
 from __future__ import annotations
 
+import re
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -17,6 +19,7 @@ from PySide6.QtWidgets import (
     QCompleter,
     QDoubleSpinBox,
     QFormLayout,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -29,6 +32,7 @@ from PySide6.QtWidgets import (
 )
 
 from stepwise.core.models import ActionItem, ImageCondition
+from stepwise.core.variables import substitute_variables
 from stepwise.ui.strings import Strings
 from stepwise.ui.theme import get_theme_tokens
 
@@ -44,12 +48,20 @@ class PropertiesPanel(QWidget):
     request_test_step = Signal(object)
     request_test_match = Signal(object)
     request_show_crosshair = Signal(int, int)
+    request_locate_target = Signal(object)
+    request_open_data_file = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._current_action: ActionItem | None = None
         self._available_headers: list[str] = []
+        self._sample_row: dict[str, str] = {}
         self.txt_text: QLineEdit | None = None
+        self.lbl_row_preview: QLabel | None = None
+        self.lbl_hangeul_hint: QLabel | None = None
+        self.chips_widget: QWidget | None = None
+        self.chip_buttons: list[QPushButton] = []
+        self.btn_locate: QPushButton | None = None
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(8, 8, 8, 8)
@@ -281,11 +293,17 @@ class PropertiesPanel(QWidget):
             btn_show.setToolTip(Strings.Tooltips.SHOW_ON_SCREEN)
             btn_show.clicked.connect(lambda: self.request_show_crosshair.emit(action.x, action.y))
 
+            btn_locate = QPushButton(Strings.BTN_LOCATE_TARGET)
+            btn_locate.setToolTip(Strings.LOCATE_TOOLTIP)
+            btn_locate.clicked.connect(lambda: self.request_locate_target.emit(action))
+            self.btn_locate = btn_locate
+
             btn_test_click = QPushButton("⚡ " + Strings.TEST_THIS_STEP)
             btn_test_click.setToolTip(Strings.Tooltips.TEST_THIS_STEP)
             btn_test_click.clicked.connect(lambda: self.request_test_step.emit(action))
 
             h_helpers.addWidget(btn_show)
+            h_helpers.addWidget(btn_locate)
             h_helpers.addWidget(btn_test_click)
             act_layout.addRow(Strings.ACTION_TOOLS_LABEL, h_helpers)
 
@@ -310,9 +328,6 @@ class PropertiesPanel(QWidget):
         elif action.type == "type_text":
             self.txt_text = QLineEdit(action.text)
             self.txt_text.setPlaceholderText("Enter text or {ColumnName}")
-            self.txt_text.textChanged.connect(
-                lambda v: setattr(action, "text", v) or self.property_changed.emit()
-            )
 
             if self._available_headers:
                 variables = [f"{{{h}}}" for h in self._available_headers]
@@ -323,17 +338,48 @@ class PropertiesPanel(QWidget):
 
             act_layout.addRow(Strings.TEXT_TO_TYPE, self.txt_text)
 
+            # Column insertion chips
+            self.chips_widget = self._create_column_chips_widget(action)
+            act_layout.addRow(Strings.DATA_CHIP_LABEL, self.chips_widget)
+
+            # Live 1st-row preview & Korean typing nudge
+            t = get_theme_tokens()
+            self.lbl_row_preview = QLabel()
+            self.lbl_row_preview.setWordWrap(True)
+            self.lbl_row_preview.setStyleSheet(
+                f"QLabel {{ background-color: {t['bg_alt']}; color: {t['text']}; "
+                f"border: 1px solid {t['border']}; border-radius: 4px; padding: 4px 8px; font-size: 11px; }}"
+            )
+            act_layout.addRow(Strings.ROW_PREVIEW_PREFIX, self.lbl_row_preview)
+
+            self.lbl_hangeul_hint = QLabel(Strings.KOREAN_IME_NUDGE)
+            self.lbl_hangeul_hint.setWordWrap(True)
+            self.lbl_hangeul_hint.setStyleSheet(f"font-size: 11px; color: {t['accent']}; font-weight: 500;")
+            act_layout.addRow("", self.lbl_hangeul_hint)
+
+            def _on_txt_changed(v: str) -> None:
+                action.text = v
+                self._update_text_preview(action)
+                self.property_changed.emit()
+
+            self.txt_text.textChanged.connect(_on_txt_changed)
+
             btn_test_type = QPushButton("⚡ " + Strings.TEST_THIS_STEP)
             btn_test_type.setToolTip(Strings.Tooltips.TEST_THIS_STEP)
             btn_test_type.clicked.connect(lambda: self.request_test_step.emit(action))
             act_layout.addRow(Strings.ACTION_TOOLS_LABEL, btn_test_type)
 
             self.cmb_mode = QComboBox()
-            self.cmb_mode.addItems(["paste", "keystrokes"])
-            self.cmb_mode.setCurrentText(action.mode)
-            self.cmb_mode.currentTextChanged.connect(
-                lambda v: setattr(action, "mode", v) or self.property_changed.emit()
-            )
+            self.cmb_mode.addItem(Strings.MODE_PASTE, "paste")
+            self.cmb_mode.addItem(Strings.MODE_KEYSTROKES, "keystrokes")
+            self.cmb_mode.setCurrentIndex(0 if action.mode == "paste" else 1)
+
+            def _on_mode_changed(_idx: int) -> None:
+                action.mode = str(self.cmb_mode.currentData() or "paste")
+                self._update_text_preview(action)
+                self.property_changed.emit()
+
+            self.cmb_mode.currentIndexChanged.connect(_on_mode_changed)
             act_layout.addRow(Strings.TYPE_MODE, self.cmb_mode)
 
             self.chk_select_all = QCheckBox(Strings.SELECT_ALL_FIRST)
@@ -342,6 +388,8 @@ class PropertiesPanel(QWidget):
                 lambda v: setattr(action, "select_all_first", v) or self.property_changed.emit()
             )
             act_layout.addRow(self.chk_select_all)
+
+            self._update_text_preview(action)
 
         elif action.type == "key":
             self.txt_keys = QLineEdit(action.keys)
@@ -557,12 +605,108 @@ class PropertiesPanel(QWidget):
             self._current_action.wait_before = val
             self.property_changed.emit()
 
-    def update_variable_completions(self, headers: list[str]) -> None:
-        """Update available variable completions from loaded data columns."""
+    def _create_column_chips_widget(self, action: ActionItem) -> QWidget:
+        """Create container of clickable pill chips for inserting column variables."""
+        widget = QWidget()
+        layout = QGridLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+        self._populate_column_chips(widget, action)
+        return widget
+
+    def _populate_column_chips(self, container: QWidget, action: ActionItem) -> None:
+        """Populate column pill chips in a multi-row grid so panel width does not expand."""
+        layout = container.layout()
+        if not isinstance(layout, QGridLayout):
+            return
+
+        # Clear existing items
+        while layout.count() > 0:
+            child = layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+
+        self.chip_buttons = []
+        t = get_theme_tokens()
+
+        if self._available_headers:
+            # Multi-row grid layout: up to 3 columns per row to strictly fit 320px panel
+            cols_per_row = 3
+            for idx, h in enumerate(self._available_headers[:9]):
+                btn = QPushButton(f"+ {{{h}}}")
+                btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                btn.setStyleSheet(
+                    f"QPushButton {{ background-color: {t['chip_bg']}; color: {t['chip_fg']}; "
+                    f"border: 1px solid {t['chip_border']}; border-radius: 10px; padding: 2px 6px; font-size: 11px; }} "
+                    f"QPushButton:hover {{ background-color: {t['bg_hover']}; }}"
+                )
+                btn.clicked.connect(lambda _checked=False, col=h: self._insert_column_token(col))
+                self.chip_buttons.append(btn)
+                r = idx // cols_per_row
+                c = idx % cols_per_row
+                layout.addWidget(btn, r, c)
+        else:
+            nudge_btn = QPushButton(Strings.DATA_NO_FILE_NUDGE)
+            nudge_btn.setStyleSheet(
+                f"QPushButton {{ background: transparent; color: {t['accent']}; "
+                f"border: none; text-align: left; font-size: 11px; text-decoration: underline; }}"
+            )
+            nudge_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            nudge_btn.clicked.connect(self.request_open_data_file.emit)
+            layout.addWidget(nudge_btn, 0, 0, 1, 3)
+
+    def _insert_column_token(self, column_name: str) -> None:
+        """Insert {column_name} at current cursor position in txt_text."""
+        if hasattr(self, "txt_text") and self.txt_text is not None:
+            self.txt_text.insert(f"{{{column_name}}}")
+            self.txt_text.setFocus()
+
+    def _update_text_preview(self, action: ActionItem) -> None:
+        """Update live sample preview and Korean IME recommendations."""
+        if not hasattr(self, "lbl_row_preview") or self.lbl_row_preview is None:
+            return
+
+        raw_text = self.txt_text.text() if self.txt_text is not None else action.text
+        if not raw_text:
+            self.lbl_row_preview.setText(Strings.PREVIEW_EMPTY_TEXT)
+            if self.lbl_hangeul_hint is not None:
+                self.lbl_hangeul_hint.hide()
+            return
+
+        # Resolve variables against sample row
+        try:
+            resolved = substitute_variables(raw_text, self._sample_row, strict=False)
+        except Exception:
+            resolved = raw_text
+
+        if self._sample_row:
+            self.lbl_row_preview.setText(f"{resolved}")
+        else:
+            self.lbl_row_preview.setText(Strings.PREVIEW_NO_DATA_TEXT.format(text=raw_text))
+
+        # Korean IME nudge check
+        has_korean = bool(re.search(r"[\uac00-\ud7a3]", raw_text + resolved))
+        if self.lbl_hangeul_hint is not None:
+            self.lbl_hangeul_hint.setVisible(has_korean and action.mode == "keystrokes")
+
+    def update_variable_completions(
+        self, headers: list[str], sample_row: dict[str, str] | None = None
+    ) -> None:
+        """Update available variable completions, column pill chips, and sample preview."""
         self._available_headers = headers
+        if sample_row is not None:
+            self._sample_row = sample_row
+
+        # Dynamically rebuild chip pills if editor is currently open on a type_text action
+        if self.chips_widget and self._current_action and self._current_action.type == "type_text":
+            self._populate_column_chips(self.chips_widget, self._current_action)
+
         if hasattr(self, "txt_text") and self.txt_text is not None:
             variables = [f"{{{h}}}" for h in headers]
             completer = QCompleter(variables, self.txt_text)
             completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
             completer.setFilterMode(Qt.MatchFlag.MatchContains)
             self.txt_text.setCompleter(completer)
+
+            if self._current_action and self._current_action.type == "type_text":
+                self._update_text_preview(self._current_action)

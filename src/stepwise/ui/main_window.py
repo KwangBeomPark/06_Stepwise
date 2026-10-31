@@ -23,6 +23,7 @@ from typing import Any
 from PySide6.QtCore import QObject, Qt, QTimer, Signal, Slot
 from PySide6.QtGui import QAction, QCloseEvent, QIcon, QKeySequence
 from PySide6.QtWidgets import (
+    QApplication,
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -82,6 +83,7 @@ class ExecutionSnapshot:
     skip_setup: bool
     skip_cleanup: bool
     run_1_row: bool
+    countdown_seconds: float = 0.0
 
 
 class MainWindow(QMainWindow):
@@ -318,6 +320,8 @@ class MainWindow(QMainWindow):
         self.prop_panel.request_pick.connect(self._trigger_pick_overlay)
         self.prop_panel.request_pick_element.connect(self._trigger_element_pick_overlay)
         self.prop_panel.request_validate_selector.connect(self._validate_and_highlight_selector)
+        self.prop_panel.request_locate_target.connect(self._locate_target_only)
+        self.prop_panel.request_open_data_file.connect(self.data_panel._on_choose_file)
         self.prop_panel.request_capture.connect(self._trigger_capture_overlay)
         self.prop_panel.request_show_crosshair.connect(self._show_screen_crosshair)
         self.prop_panel.request_test_step.connect(self._test_single_action)
@@ -413,6 +417,7 @@ class MainWindow(QMainWindow):
             self._current_macro = macro
             self._current_macro_path = swm_path
             self.action_tree.load_macro(macro)
+            self.action_tree.set_data_row_count(len(self._data_rows))
             self._update_status_bar_screen_info()
             self.setWindowTitle(f"{macro.name} — {Strings.APP_TITLE}")
             self.status_bar.showMessage(f"Loaded: {macro.name}")
@@ -566,6 +571,19 @@ class MainWindow(QMainWindow):
         self.action_tree.rebuild_tree(select_id=action.id)
         self.status_bar.showMessage("Moved step up" if offset < 0 else "Moved step down")
 
+    def _locate_target_only(self, action: ActionItem) -> None:
+        """Visual-only locate target without sending clicks or keystrokes."""
+        self.status_bar.showMessage(Strings.LOCATE_TARGET_ACTIVE, 2000)
+        target_mode = getattr(action, "target_mode", "coords")
+        if target_mode == "selector" and getattr(action, "selector", None):
+            self._validate_and_highlight_selector(action)
+        elif getattr(action, "x", None) is not None and getattr(action, "y", None) is not None:
+            self._show_screen_crosshair(action.x, action.y)
+        elif getattr(action, "image", None):
+            self._test_image_match(action)
+        else:
+            self.status_bar.showMessage(Strings.SELECTOR_SUMMARY_EMPTY, 2500)
+
     def _show_screen_crosshair(self, x: int, y: int) -> None:
         self._crosshair_overlay = ScreenCrosshairOverlay(x, y)
         self.status_bar.showMessage(f"Displaying target coordinate ({x}, {y}) on screen (1.5s)...")
@@ -666,7 +684,9 @@ class MainWindow(QMainWindow):
         self._data_row_nums = (
             list(row_nums) if row_nums is not None else list(range(1, len(rows) + 1))
         )
-        self.prop_panel.update_variable_completions(headers)
+        sample_row = rows[0] if rows else {}
+        self.prop_panel.update_variable_completions(headers, sample_row=sample_row)
+        self.action_tree.set_data_row_count(len(rows))
         self.status_bar.showMessage(
             f"Connected data: {os.path.basename(filepath)} ({len(rows)} rows)"
         )
@@ -947,8 +967,12 @@ class MainWindow(QMainWindow):
             # All mutable UI state is copied on the UI thread. The worker closes
             # over only these private snapshots, its controller, and run token.
             macro_snapshot = copy.deepcopy(self._current_macro)
-            rows_snapshot = copy.deepcopy(self._data_rows)
-            row_nums_snapshot = copy.deepcopy(self._data_row_nums)
+            if "custom_rows" in opts and "custom_row_nums" in opts:
+                rows_snapshot = copy.deepcopy(opts["custom_rows"])
+                row_nums_snapshot = copy.deepcopy(opts["custom_row_nums"])
+            else:
+                rows_snapshot = copy.deepcopy(self._data_rows)
+                row_nums_snapshot = copy.deepcopy(self._data_row_nums)
             opts = copy.deepcopy(opts)
             self._last_run_opts = opts
             snapshot = ExecutionSnapshot(
@@ -963,6 +987,7 @@ class MainWindow(QMainWindow):
                 skip_setup=opts.get("skip_setup", False),
                 skip_cleanup=opts.get("skip_cleanup", False),
                 run_1_row=opts.get("run_1_row", False),
+                countdown_seconds=float(opts.get("countdown_seconds", 0.0)),
             )
         except Exception as e:
             self._teardown_runner()
@@ -1028,7 +1053,7 @@ class MainWindow(QMainWindow):
                     run_1_row=snapshot.run_1_row,
                     start_row_index=snapshot.start_row_index,
                     package_dir=snapshot.package_dir,
-                    countdown_seconds=0.0,
+                    countdown_seconds=snapshot.countdown_seconds,
                     data_filepath=snapshot.data_filepath,
                     results_dir=snapshot.results_dir,
                     row_numbers=snapshot.row_numbers,
@@ -1094,9 +1119,56 @@ class MainWindow(QMainWindow):
 
             lock_workstation()
         if summary:
+            # Flash taskbar icon to gently notify the user
+            app = QApplication.instance()
+            if app:
+                QApplication.alert(self, 0)
             dlg = RunSummaryDialog(summary, parent=self)
             dlg.jump_to_step_requested.connect(self._jump_to_step)
+            dlg.retry_failed_requested.connect(self._retry_failed_rows)
             dlg.exec()
+
+    def _retry_failed_rows(self, failed_row_numbers: list[int] | None = None) -> None:
+        if failed_row_numbers is None:
+            if self._pending_summary and getattr(self._pending_summary, "failed_row_numbers", None):
+                failed_row_numbers = self._pending_summary.failed_row_numbers
+            else:
+                failed_row_numbers = self.data_panel.get_failed_row_numbers()
+
+        if not failed_row_numbers:
+            self.status_bar.showMessage("No failed rows to retry.")
+            return
+
+        first_fail = failed_row_numbers[0]
+        # Resume from first failed row to the end so subsequent rows are not skipped
+        retry_rows: list[dict[str, str]] = []
+        retry_row_nums: list[int] = []
+        for idx, r_num in enumerate(self._data_row_nums):
+            if r_num >= first_fail:
+                if idx < len(self._data_rows):
+                    retry_rows.append(self._data_rows[idx])
+                    retry_row_nums.append(r_num)
+
+        if not retry_rows:
+            return
+
+        # Preserve user's previous run options (speed, skip_setup, skip_cleanup, step_by_step, etc.)
+        opts = copy.deepcopy(self._last_run_opts) if self._last_run_opts else {}
+        opts.pop("scheduled", None)
+        opts.pop("lock_after", None)
+        opts.update(
+            {
+                "start_row": 1,
+                "run_1_row": False,
+                "custom_rows": retry_rows,
+                "custom_row_nums": retry_row_nums,
+                "countdown_seconds": 3.0,
+            }
+        )
+        self.status_bar.showMessage(
+            f"Resuming from row #{first_fail} to end ({len(retry_rows)} rows remaining, starting in 3s)..."
+        )
+        self._start_execution(opts)
 
     def _jump_to_step(self, step_id: str) -> None:
         self.action_tree.highlight_step(step_id, is_running=False, is_failed=True)

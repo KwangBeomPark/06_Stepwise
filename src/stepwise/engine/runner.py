@@ -42,6 +42,7 @@ class RunSummary:
     pending_results_path: str | None = None
     buffered_results: list[RowResultRecord] = field(default_factory=list)
     persistence_errors: list[str] = field(default_factory=list)
+    failed_row_numbers: list[int] = field(default_factory=list)
 
 
 class ExecutionCallbacks:
@@ -184,6 +185,7 @@ def run_macro(
 
     done_count = 0
     failed_count = 0
+    failed_row_numbers: list[int] = []
     interrupted_count = 0
     skipped_count = 0
     failure: StepFailure | None = None
@@ -348,6 +350,8 @@ def run_macro(
             target_fail_row = e.row_number
             if target_fail_row is None and current_row_active:
                 target_fail_row = last_row_num
+            if target_fail_row is not None and target_fail_row not in failed_row_numbers:
+                failed_row_numbers.append(target_fail_row)
             screenshot_saved = save_failure_screenshot(
                 results_dir=results_dir,
                 run_id=run_id,
@@ -392,6 +396,8 @@ def run_macro(
             )
             failure = wrapped
             failed_count += 1
+            if current_row_active and last_row_num is not None and last_row_num not in failed_row_numbers:
+                failed_row_numbers.append(last_row_num)
             screenshot_saved = save_failure_screenshot(
                 results_dir=results_dir,
                 run_id=run_id,
@@ -449,6 +455,7 @@ def run_macro(
         ),
         buffered_results=list(res_mgr.pending_records) if res_mgr else [],
         persistence_errors=list(res_mgr.persistence_errors) if res_mgr else [],
+        failed_row_numbers=list(failed_row_numbers),
     )
 
     if cbs.on_run_finished:

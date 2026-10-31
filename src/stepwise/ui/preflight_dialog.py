@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
 from stepwise.core.models import Macro
 from stepwise.engine.preflight import run_preflight_checks
 from stepwise.engine.timing import SpeedMode
+from stepwise.ui.strings import Strings
 from stepwise.ui.theme import get_theme_tokens
 
 
@@ -154,6 +155,12 @@ class PreflightDialog(QDialog):
             f"color: {t['accent_primary']}; font-weight: bold; font-size: 13px;"
         )
         main_layout.addWidget(self.lbl_countdown)
+
+        # Gentle Safety Reminder Nudge
+        self.lbl_f12_reminder = QLabel(f"💡 {Strings.F12_GENTLE_REMINDER}")
+        self.lbl_f12_reminder.setWordWrap(True)
+        self.lbl_f12_reminder.setStyleSheet(f"color: {t['text_secondary']}; font-size: 11px;")
+        main_layout.addWidget(self.lbl_f12_reminder)
 
         # 5. Buttons
         btn_layout = QHBoxLayout()

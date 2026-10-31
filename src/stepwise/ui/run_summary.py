@@ -33,6 +33,7 @@ from stepwise.ui.theme import get_theme_tokens
 
 class RunSummaryDialog(QDialog):
     jump_to_step_requested = Signal(str)
+    retry_failed_requested = Signal(list)
 
     def __init__(
         self,
@@ -42,7 +43,7 @@ class RunSummaryDialog(QDialog):
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Stepwise — Execution Summary")
-        self.resize(480, 440)
+        self.resize(500, 460)
 
         self.summary = summary
         results_csv_path = (
@@ -55,17 +56,29 @@ class RunSummaryDialog(QDialog):
         layout.setContentsMargins(18, 18, 18, 18)
         layout.setSpacing(12)
 
-        # Header Title
-        title_text = (
-            "Run Completed Successfully"
-            if summary.failed_count == 0 and not summary.interrupted
-            else "Run Stopped"
-        )
-        title_color = (
-            t["status_ok"]
-            if summary.failed_count == 0 and not summary.interrupted
-            else t["status_fail"]
-        )
+        # Header Title with User-Friendly Nudge
+        if summary.failed_count == 0 and not summary.interrupted:
+            title_text = Strings.SUMMARY_TITLE_SUCCESS.format(
+                count=summary.total_rows, duration=summary.duration_sec
+            )
+            title_color = t["status_ok"]
+        elif summary.interrupted:
+            int_row = summary.done_count + 1
+            title_text = Strings.SUMMARY_TITLE_INTERRUPTED.format(
+                done=summary.done_count, row=int_row
+            )
+            title_color = t["status_warn"]
+        else:
+            first_fail = (
+                summary.failed_row_numbers[0]
+                if summary.failed_row_numbers
+                else (summary.done_count + 1)
+            )
+            title_text = Strings.SUMMARY_TITLE_FAILED.format(
+                row=first_fail, done=summary.done_count
+            )
+            title_color = t["status_fail"]
+
         lbl_title = QLabel(title_text)
         lbl_title.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {title_color};")
         layout.addWidget(lbl_title)
@@ -121,6 +134,16 @@ class RunSummaryDialog(QDialog):
 
         # Buttons
         btn_layout = QHBoxLayout()
+        failed_rows = getattr(summary, "failed_row_numbers", [])
+        if failed_rows:
+            retry_label = Strings.RESUME_FROM_FAILED_ROW.format(row=failed_rows[0])
+            btn_retry = QPushButton(f"🔄 {retry_label}")
+            btn_retry.setStyleSheet(
+                f"font-weight: bold; padding: 6px 14px; background-color: {t['accent']}; color: white; border-radius: 4px;"
+            )
+            btn_retry.clicked.connect(self._on_retry_failed)
+            btn_layout.addWidget(btn_retry)
+
         if summary.buffered_results:
             btn_export = QPushButton(Strings.EXPORT_BUFFERED_RESULTS)
             btn_export.clicked.connect(self._export_buffered_results)
@@ -130,11 +153,20 @@ class RunSummaryDialog(QDialog):
             btn_csv.clicked.connect(lambda: self._open_file(results_csv_path))
             btn_layout.addWidget(btn_csv)
 
+            btn_folder = QPushButton(f"📂 {Strings.OPEN_RESULTS_FOLDER}")
+            btn_folder.clicked.connect(lambda: self._open_folder(os.path.dirname(results_csv_path)))
+            btn_layout.addWidget(btn_folder)
+
         btn_layout.addStretch()
         btn_close = QPushButton("Close")
         btn_close.clicked.connect(self.accept)
         btn_layout.addWidget(btn_close)
         layout.addLayout(btn_layout)
+
+    def _on_retry_failed(self) -> None:
+        rows = list(getattr(self.summary, "failed_row_numbers", []))
+        self.accept()
+        self.retry_failed_requested.emit(rows)
 
     def _export_buffered_results(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
@@ -162,3 +194,15 @@ class RunSummaryDialog(QDialog):
             os.startfile(filepath)
         except Exception as e:
             print(f"Error opening file {filepath}: {e}")
+
+    def _open_folder(self, folderpath: str) -> None:
+        if not os.path.exists(folderpath):
+            return
+        try:
+            if hasattr(os, "startfile"):
+                os.startfile(folderpath)
+            else:
+                import subprocess
+                subprocess.Popen(["xdg-open", folderpath])
+        except Exception as e:
+            print(f"Error opening folder {folderpath}: {e}")

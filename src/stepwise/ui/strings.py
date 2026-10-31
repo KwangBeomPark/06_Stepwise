@@ -61,10 +61,13 @@ class Strings:
     )
 
     # Sections
-    SECTION_SETUP = "SETUP (runs once)"
-    SECTION_PER_ROW = "PER ROW (runs for each data row)"
-    SECTION_CLEANUP = "CLEANUP (runs once at the end)"
+    SECTION_SETUP = "① SETUP (runs once at start)"
+    SECTION_PER_ROW = "② PER ROW (repeats for each row)"
+    SECTION_CLEANUP = "③ CLEANUP (runs once at end, optional)"
     SECTION_EMPTY_PLACEHOLDER = "(Empty — select to add action here)"
+    SECTION_SETUP_EMPTY = "(Empty — window alignment, login, etc. Optional)"
+    SECTION_PER_ROW_EMPTY = "(Empty — click, type {Column}, save for each data row)"
+    SECTION_CLEANUP_EMPTY = "(Empty — close screen, logout, etc. Optional)"
     INSERT_TARGET_TOP = "Add target: [{section}] at beginning"
     INSERT_TARGET_AFTER = "Add target: [{section}] after Step #{step}"
     INSERT_TARGET_GROUP = 'Add target: [{section}] after group "{group}"'
@@ -138,8 +141,8 @@ class Strings:
     CLICKS = "Clicks:"
     TEXT_TO_TYPE = "Text to type:"
     TYPE_MODE = "Typing mode:"
-    MODE_PASTE = "Paste (Clipboard)"
-    MODE_KEYSTROKES = "Keystrokes (Unicode)"
+    MODE_PASTE = "Paste (Clipboard, Recommended for Korean)"
+    MODE_KEYSTROKES = "Keystrokes (English/Numbers)"
     SELECT_ALL_FIRST = "Select all first (Ctrl+A)"
     KEYS_TO_PRESS = "Keys to press:"
     REPEAT_COUNT = "Repeat count:"
@@ -174,6 +177,27 @@ class Strings:
     SELECTOR_AUTOMATION_ID = "Automation ID:"
     SELECTOR_NAME = "Element Name:"
     SELECTOR_CLASS_NAME = "Class Name:"
+
+    # UX Nudges & Micro-interactions
+    DATA_CHIP_LABEL = "Insert Column:"
+    DATA_NO_FILE_NUDGE = "To insert column variables: [📂 Connect Excel / CSV File]"
+    ROW_PREVIEW_PREFIX = "Row 1 Preview:"
+    KOREAN_IME_NUDGE = "💡 Clipboard paste is recommended for Korean text to avoid composition glitches."
+    BTN_LOCATE_TARGET = "🔍 Locate Only"
+    BTN_TEST_STEP = "▶ Test Step"
+    LOCATE_TARGET_ACTIVE = "Highlighting target for 1 second (no clicks will be sent)..."
+    RETRY_FAILED_ROWS = "Retry Failed {count} Rows Only"
+    RESUME_FROM_FAILED_ROW = "Resume from Row #{row} to End"
+    F12_GENTLE_REMINDER = "You can stop safely at any time by pressing F12."
+    LOOP_REPETITION_LABEL = " — {rows} rows × {steps} steps"
+    BEFORE_DATA_CONNECTED = " — Before Data Connected"
+    PREVIEW_EMPTY_TEXT = "(Type text in properties panel)"
+    PREVIEW_NO_DATA_TEXT = "{text} (Fixed string without connected data)"
+    QUICK_START_BANNER = "💡 Quick Start: ① Connect Excel data ➜ ② Add actions below ➜ ③ [▶ Run]"
+    LOCATE_TOOLTIP = "Highlight target area on screen for 1.5 seconds without sending clicks."
+    SUMMARY_TITLE_SUCCESS = "✓ Completed all {count} rows ({duration}s)"
+    SUMMARY_TITLE_INTERRUPTED = "⚠️ Interrupted — {done} done, row #{row} stopped"
+    SUMMARY_TITLE_FAILED = "⚠️ Failed at row #{row} — {done} completed"
 
     # Window Bounds Properties
     WINDOW_TITLE_LABEL = "Window Title:"
@@ -525,10 +549,13 @@ _KO_STRINGS: dict[str, str] = {
         "일부 결과를 디스크에 저장할 수 없어 메모리에 보관 중입니다. "
         "창을 닫지 마시고 결과를 파일로 내보내 주세요."
     ),
-    "SECTION_SETUP": "SETUP (초기화 — 최초 1회 실행)",
-    "SECTION_PER_ROW": "PER ROW (행별 반복 — 데이터 각 행마다 실행)",
-    "SECTION_CLEANUP": "CLEANUP (마무리 — 종료 전 1회 실행)",
+    "SECTION_SETUP": "① 시작할 때 1번 (창 열기·로그인)",
+    "SECTION_PER_ROW": "② 엑셀 각 줄마다 반복 (핵심 입력 루프)",
+    "SECTION_CLEANUP": "③ 끝날 때 1번 (창 닫기, 없어도 됨)",
     "SECTION_EMPTY_PLACEHOLDER": "(비어 있음 — 여기를 선택한 뒤 동작을 추가하세요)",
+    "SECTION_SETUP_EMPTY": "(비어 있음 — 창 위치 맞추기, 로그인 등. 비워두셔도 됩니다)",
+    "SECTION_PER_ROW_EMPTY": "(비어 있음 — 입력 칸 클릭 ➜ {열이름} 타이핑 ➜ 저장 등 반복 동작 추가)",
+    "SECTION_CLEANUP_EMPTY": "(비어 있음 — 완료 후 창 닫기, 로그아웃 등. 비워두셔도 됩니다)",
     "INSERT_TARGET_TOP": "추가 위치: [{section}] 맨 앞",
     "INSERT_TARGET_AFTER": "추가 위치: [{section}] Step #{step} 다음",
     "INSERT_TARGET_GROUP": '추가 위치: [{section}] 그룹 "{group}" 다음',
@@ -588,8 +615,8 @@ _KO_STRINGS: dict[str, str] = {
     "CLICKS": "클릭 횟수:",
     "TEXT_TO_TYPE": "입력할 텍스트:",
     "TYPE_MODE": "입력 방식:",
-    "MODE_PASTE": "붙여넣기 (클립보드)",
-    "MODE_KEYSTROKES": "타이핑 (유니코드 키 입력)",
+    "MODE_PASTE": "클립보드 붙여넣기 (한글 추천)",
+    "MODE_KEYSTROKES": "직접 타이핑 (영문/숫자)",
     "SELECT_ALL_FIRST": "입력 전 전체 선택 (Ctrl+A)",
     "KEYS_TO_PRESS": "누를 키 조합:",
     "REPEAT_COUNT": "반복 횟수:",
@@ -622,6 +649,25 @@ _KO_STRINGS: dict[str, str] = {
     "SELECTOR_AUTOMATION_ID": "Automation ID:",
     "SELECTOR_NAME": "요소 이름(Name):",
     "SELECTOR_CLASS_NAME": "클래스명(Class):",
+    "DATA_CHIP_LABEL": "엑셀 열 넣기:",
+    "DATA_NO_FILE_NUDGE": "행마다 다른 값을 넣으려면: [📂 엑셀 / CSV 파일 연결]",
+    "ROW_PREVIEW_PREFIX": "첫 데이터 행 미리보기:",
+    "KOREAN_IME_NUDGE": "💡 한글 입력은 조합 깨짐 방지를 위해 '클립보드 붙여넣기' 방식을 권장합니다.",
+    "BTN_LOCATE_TARGET": "🔍 위치만 확인",
+    "BTN_TEST_STEP": "▶ 1회 테스트",
+    "LOCATE_TARGET_ACTIVE": "대상 위치를 1초간 빨간 테두리로 표시합니다 (클릭/입력 없음)...",
+    "RETRY_FAILED_ROWS": "실패한 {count}개 행만 다시 실행",
+    "RESUME_FROM_FAILED_ROW": "실패한 {row}번째 줄부터 끝까지 이어서 실행",
+    "F12_GENTLE_REMINDER": "실행 중 언제든 F12를 누르면 안전하게 즉시 멈출 수 있습니다.",
+    "LOOP_REPETITION_LABEL": " — {rows}줄 × {steps}단계",
+    "BEFORE_DATA_CONNECTED": " — 데이터 연결 전",
+    "PREVIEW_EMPTY_TEXT": "(텍스트를 입력하세요)",
+    "PREVIEW_NO_DATA_TEXT": "{text} (데이터 파일 미연결 시 고정 문자열)",
+    "QUICK_START_BANNER": "💡 빠른 시작: ① 엑셀 데이터 연결 ➜ ② 아래 버튼으로 동작 추가 ➜ ③ [▶ 실행]",
+    "LOCATE_TOOLTIP": "클릭하지 않고 대상 위치에 빨간 테두리만 1.5초간 표시하여 안전하게 확인합니다.",
+    "SUMMARY_TITLE_SUCCESS": "✓ 전체 {count}개 행 입력 완료 ({duration}초)",
+    "SUMMARY_TITLE_INTERRUPTED": "⚠️ 실행 중단됨 — {done}개 완료, {row}번째 행에서 멈춤",
+    "SUMMARY_TITLE_FAILED": "⚠️ {row}번째 행에서 오류 발생 — {done}개 완료",
     "WINDOW_TITLE_LABEL": "대상 창 제목:",
     "WINDOW_PICK_BUTTON": "🔍 실행 중인 창 선택",
     "WINDOW_PICK_TOOLTIP": "현재 열려 있는 프로그램 창 목록에서 선택합니다",

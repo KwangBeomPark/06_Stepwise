@@ -90,6 +90,7 @@ class ActionTreeWidget(QWidget):
         self._is_compact = False
         self._search_query = ""
         self._filter_mode = "all"
+        self._data_row_count = 0
         self._highlighted_item: QTreeWidgetItem | None = None
 
         layout = QVBoxLayout(self)
@@ -268,6 +269,12 @@ class ActionTreeWidget(QWidget):
         if not self._macro:
             self.lbl_target.setText("🎯 No macro loaded")
             return
+
+        total_actions = len(self._macro.setup) + len(self._macro.per_row) + len(self._macro.cleanup)
+        if total_actions == 0:
+            self.lbl_target.setText(Strings.QUICK_START_BANNER)
+            return
+
         sec_name, parent, ins_idx = self.get_current_insertion_target()
         sec_display = self._target_display(sec_name, parent)
         selected = self.tree.selectedItems()
@@ -366,9 +373,24 @@ class ActionTreeWidget(QWidget):
         self._macro = macro
         self.rebuild_tree()
 
+    def set_data_row_count(self, count: int) -> None:
+        """Update data row count to display loop repetition numbers in PER ROW header."""
+        self._data_row_count = max(0, count)
+        if self._macro:
+            self.rebuild_tree()
+
     def _add_empty_placeholder(self, parent: QTreeWidgetItem, sec_name: str) -> None:
         t = get_theme_tokens()
-        placeholder = QTreeWidgetItem(["", "", Strings.SECTION_EMPTY_PLACEHOLDER, "", "", "", ""])
+        if sec_name == "setup":
+            text = Strings.SECTION_SETUP_EMPTY
+        elif sec_name == "per_row":
+            text = Strings.SECTION_PER_ROW_EMPTY
+        elif sec_name == "cleanup":
+            text = Strings.SECTION_CLEANUP_EMPTY
+        else:
+            text = Strings.SECTION_EMPTY_PLACEHOLDER
+
+        placeholder = QTreeWidgetItem(["", "", text, "", "", "", ""])
         placeholder.setData(0, Qt.ItemDataRole.UserRole, f"empty_{sec_name}")
         placeholder.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
         p_font = QFont()
@@ -424,7 +446,15 @@ class ActionTreeWidget(QWidget):
         setup_header.setExpanded(True)
 
         # Section 2: PER ROW
-        per_row_header = QTreeWidgetItem(["", "", Strings.SECTION_PER_ROW, "", "", "", ""])
+        per_row_text = Strings.SECTION_PER_ROW
+        per_row_count = len(self._macro.per_row)
+        if getattr(self, "_data_row_count", 0) > 0:
+            per_row_text += Strings.LOOP_REPETITION_LABEL.format(
+                rows=self._data_row_count, steps=per_row_count
+            )
+        else:
+            per_row_text += Strings.BEFORE_DATA_CONNECTED
+        per_row_header = QTreeWidgetItem(["", "", per_row_text, "", "", "", ""])
         per_row_header.setData(0, Qt.ItemDataRole.UserRole, "header_per_row")
         per_row_header.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
         per_row_header.setFont(2, setup_font)
