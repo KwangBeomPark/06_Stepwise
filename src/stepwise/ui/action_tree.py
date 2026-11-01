@@ -27,50 +27,91 @@ from PySide6.QtWidgets import (
 )
 
 from stepwise.core.models import ActionItem, Macro
-from stepwise.ui.strings import Strings
+from stepwise.ui.strings import Strings, action_type_label, get_current_language
 from stepwise.ui.theme import get_theme_tokens
 
 
+def _missing_input_warning(action: ActionItem) -> str | None:
+    """Friendly hint for a step that cannot run yet (Korean UI only)."""
+    if action.type == "type_text" and not action.text:
+        return Strings.STEP_WARN_EMPTY_TEXT
+    if action.type == "key" and not action.keys.strip():
+        return Strings.STEP_WARN_EMPTY_KEYS
+    if action.type in ("click_image", "wait_image", "wait_image_gone") and not action.image:
+        return Strings.STEP_WARN_EMPTY_IMAGE
+    return None
+
+
 def format_action_target(action: ActionItem) -> str:
-    """Generate human-readable sentence-style target string."""
+    """Generate human-readable sentence-style target string.
+
+    English output keeps its long-standing wording; Korean adds hints for
+    steps that are not configured yet.
+    """
+    if get_current_language() == "ko":
+        warning = _missing_input_warning(action)
+        if warning:
+            return warning
     if action.type == "click":
-        btn_str = f" ({action.button})" if action.button != "left" else ""
-        clicks_str = "Double " if action.clicks == 2 else ""
-        sim_badge = "⚡Sim " if action.click_method == "simulate" else ""
+        mouse = {
+            "left": Strings.MOUSE_LEFT,
+            "right": Strings.MOUSE_RIGHT,
+            "middle": Strings.MOUSE_MIDDLE,
+        }.get(action.button, action.button)
+        button = Strings.SUMMARY_BUTTON.format(button=mouse) if action.button != "left" else ""
+        double = Strings.SUMMARY_DOUBLE if action.clicks == 2 else ""
+        sim = Strings.SUMMARY_SIM_BADGE if action.click_method == "simulate" else ""
         if action.target_mode == "selector" and action.selector:
             sel = action.selector
-            c_type = sel.get("control_type") or "Element"
             ident = (
                 sel.get("name")
                 or sel.get("automation_id")
                 or sel.get("class_name")
                 or sel.get("window_title")
-                or "Target"
+                or Strings.SUMMARY_TARGET
             )
-            return f'{sim_badge}🎯 {clicks_str}Click [{c_type}] "{ident}"{btn_str}'
-        return f"{sim_badge}{clicks_str}Click ({action.x}, {action.y}){btn_str}"
+            return Strings.SUMMARY_CLICK_SELECTOR.format(
+                sim=sim,
+                double=double,
+                control=sel.get("control_type") or Strings.SUMMARY_ELEMENT,
+                ident=ident,
+                button=button,
+            )
+        return Strings.SUMMARY_CLICK_XY.format(
+            sim=sim, double=double, x=action.x, y=action.y, button=button
+        )
     if action.type == "click_image":
-        return f'Click image "{action.image or ""}"'
+        return Strings.SUMMARY_CLICK_IMAGE.format(image=action.image or "")
     if action.type == "type_text":
         preview = action.text if len(action.text) <= 25 else action.text[:22] + "..."
-        mode = " [keys]" if action.mode == "keystrokes" else ""
-        return f'Type "{preview}"{mode}'
+        mode = Strings.SUMMARY_TYPE_KEYSTROKES if action.mode == "keystrokes" else ""
+        return Strings.SUMMARY_TYPE.format(text=preview, mode=mode)
     if action.type == "key":
-        rep = f" x{action.repeat}" if action.repeat > 1 else ""
-        return f'Key "{action.keys}"{rep}'
+        repeat = (
+            Strings.SUMMARY_KEY_REPEAT.format(count=action.repeat) if action.repeat > 1 else ""
+        )
+        return Strings.SUMMARY_KEY.format(keys=action.keys, repeat=repeat)
     if action.type == "wait":
-        return f"Wait {action.seconds}s"
+        return Strings.SUMMARY_WAIT.format(seconds=action.seconds)
     if action.type == "wait_image":
-        return f'Wait for "{action.image or ""}" (max {int(action.timeout)}s)'
+        return Strings.SUMMARY_WAIT_IMAGE.format(
+            image=action.image or "", timeout=int(action.timeout)
+        )
     if action.type == "wait_image_gone":
-        return f'Wait disappear "{action.image or ""}"'
+        return Strings.SUMMARY_WAIT_IMAGE_GONE.format(image=action.image or "")
     if action.type == "window_set_bounds":
-        t = action.window_title if action.window_title.strip() else "(No Window Specified)"
+        title = action.window_title if action.window_title.strip() else Strings.SUMMARY_NO_WINDOW
         if action.window_maximize:
-            return f'Window "{t}" -> Maximize'
-        return f'Window "{t}" -> ({action.window_x}, {action.window_y}) {action.window_width}x{action.window_height}'
+            return Strings.SUMMARY_WINDOW_MAXIMIZE.format(title=title)
+        return Strings.SUMMARY_WINDOW_BOUNDS.format(
+            title=title,
+            x=action.window_x,
+            y=action.window_y,
+            width=action.window_width,
+            height=action.window_height,
+        )
     if action.type == "group":
-        return f"Group: {action.name} ({len(action.items)} steps)"
+        return Strings.SUMMARY_GROUP.format(name=action.name, count=len(action.items))
     return action.type
 
 
@@ -262,12 +303,16 @@ class ActionTreeWidget(QWidget):
             names.append(parent.name or Strings.TYPE_GROUP)
             location = self._macro.find_action_location(parent)
             parent = location.parent if location is not None else None
-        section_display = "PER ROW" if section == "per_row" else section.upper()
+        section_display = {
+            "setup": Strings.TARGET_SECTION_SETUP,
+            "per_row": Strings.TARGET_SECTION_PER_ROW,
+            "cleanup": Strings.TARGET_SECTION_CLEANUP,
+        }.get(section, section.upper())
         return " / ".join([section_display, *reversed(names)])
 
     def _update_target_label(self) -> None:
         if not self._macro:
-            self.lbl_target.setText("🎯 No macro loaded")
+            self.lbl_target.setText(Strings.NO_MACRO_LOADED)
             return
 
         total_actions = len(self._macro.setup) + len(self._macro.per_row) + len(self._macro.cleanup)
@@ -303,34 +348,36 @@ class ActionTreeWidget(QWidget):
         sec_name, parent, ins_idx = self.get_current_insertion_target()
 
         # 1. Quick Add Actions
-        menu_add = menu.addMenu(f"+ Add Action to {self._target_display(sec_name, parent)}")
-        act_add_click = menu_add.addAction("👆 Add Click")
+        menu_add = menu.addMenu(
+            Strings.CTX_ADD_TO.format(target=self._target_display(sec_name, parent))
+        )
+        act_add_click = menu_add.addAction(Strings.CTX_ADD_CLICK)
         act_add_click.triggered.connect(
             lambda: self.request_add_action.emit("click", sec_name, ins_idx, parent)
         )
 
-        act_add_type = menu_add.addAction("⌨ Add Type text")
+        act_add_type = menu_add.addAction(Strings.CTX_ADD_TYPE)
         act_add_type.triggered.connect(
             lambda: self.request_add_action.emit("type_text", sec_name, ins_idx, parent)
         )
 
-        act_add_key = menu_add.addAction("↵ Add Key press")
+        act_add_key = menu_add.addAction(Strings.CTX_ADD_KEY)
         act_add_key.triggered.connect(
             lambda: self.request_add_action.emit("key", sec_name, ins_idx, parent)
         )
 
-        act_add_wait = menu_add.addAction("⏱ Add Wait")
+        act_add_wait = menu_add.addAction(Strings.CTX_ADD_WAIT)
         act_add_wait.triggered.connect(
             lambda: self.request_add_action.emit("wait", sec_name, ins_idx, parent)
         )
 
         menu_add.addSeparator()
-        act_add_img = menu_add.addAction("🖼 Add Click image")
+        act_add_img = menu_add.addAction(Strings.CTX_ADD_IMAGE)
         act_add_img.triggered.connect(
             lambda: self.request_add_action.emit("click_image", sec_name, ins_idx, parent)
         )
 
-        act_add_win = menu_add.addAction("🪟 Add Window Bounds")
+        act_add_win = menu_add.addAction(Strings.CTX_ADD_WINDOW)
         act_add_win.triggered.connect(
             lambda: self.request_add_action.emit("window_set_bounds", sec_name, ins_idx, parent)
         )
@@ -340,21 +387,21 @@ class ActionTreeWidget(QWidget):
             if isinstance(data, ActionItem):
                 menu.addSeparator()
 
-                act_up = menu.addAction(f"↑ {Strings.MOVE_UP}")
+                act_up = menu.addAction(Strings.MOVE_UP)
                 act_up.triggered.connect(lambda: self.request_move_up.emit(data))
 
-                act_down = menu.addAction(f"↓ {Strings.MOVE_DOWN}")
+                act_down = menu.addAction(Strings.MOVE_DOWN)
                 act_down.triggered.connect(lambda: self.request_move_down.emit(data))
 
                 menu.addSeparator()
-                menu_move_sec = menu.addMenu("Move to Section")
-                act_m_setup = menu_move_sec.addAction("Move to SETUP")
+                menu_move_sec = menu.addMenu(Strings.CTX_MOVE_TO_SECTION)
+                act_m_setup = menu_move_sec.addAction(Strings.CTX_MOVE_TO_SETUP)
                 act_m_setup.triggered.connect(lambda: self.request_move_section.emit(data, "setup"))
 
-                act_m_per = menu_move_sec.addAction("Move to PER ROW")
+                act_m_per = menu_move_sec.addAction(Strings.CTX_MOVE_TO_PER_ROW)
                 act_m_per.triggered.connect(lambda: self.request_move_section.emit(data, "per_row"))
 
-                act_m_clean = menu_move_sec.addAction("Move to CLEANUP")
+                act_m_clean = menu_move_sec.addAction(Strings.CTX_MOVE_TO_CLEANUP)
                 act_m_clean.triggered.connect(
                     lambda: self.request_move_section.emit(data, "cleanup")
                 )
@@ -566,7 +613,7 @@ class ActionTreeWidget(QWidget):
                 [
                     str(counter),
                     "",
-                    act.type,
+                    action_type_label(act.type),
                     format_action_target(act),
                     wait_str,
                     check_str,

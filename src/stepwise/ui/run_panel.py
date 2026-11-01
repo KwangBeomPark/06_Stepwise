@@ -56,6 +56,8 @@ class FloatingRunPanel(QWidget):
 
         self._drag_pos: QPoint | None = None
         self._is_paused = False
+        self._speed: SpeedMode = SpeedMode.NORMAL
+        self._progress: tuple[int, int, int, int] = (1, 1, 0, 0)  # row, total, ok, failed
 
         self.resize(320, 200)
         self.setStyleSheet("""
@@ -73,9 +75,9 @@ class FloatingRunPanel(QWidget):
 
         # Title Bar
         title_layout = QHBoxLayout()
-        self.lbl_title = QLabel("Stepwise ▶ Running")
+        self.lbl_title = QLabel(Strings.RUN_PANEL_RUNNING)
         self.lbl_title.setStyleSheet("font-weight: bold; font-size: 13px; color: #38bdf8;")
-        self.lbl_speed = QLabel("Speed: Normal")
+        self.lbl_speed = QLabel()
         self.lbl_speed.setStyleSheet("color: #94a3b8; font-size: 11px;")
         title_layout.addWidget(self.lbl_title)
         title_layout.addStretch()
@@ -83,7 +85,7 @@ class FloatingRunPanel(QWidget):
         layout.addLayout(title_layout)
 
         # Row Progress & Bar
-        self.lbl_row = QLabel("Row 1 / 1")
+        self.lbl_row = QLabel()
         self.lbl_row.setStyleSheet("font-size: 12px; font-weight: 600;")
         layout.addWidget(self.lbl_row)
 
@@ -108,33 +110,30 @@ class FloatingRunPanel(QWidget):
         layout.addWidget(self.prog_bar)
 
         # Current Step Label
-        self.lbl_step = QLabel("Initializing...")
+        self.lbl_step = QLabel(Strings.RUN_PANEL_INIT)
         self.lbl_step.setStyleSheet("color: #cbd5e1; font-size: 11px;")
         layout.addWidget(self.lbl_step)
 
         # Stats
-        self.lbl_stats = QLabel("OK: 0  |  Failed: 0")
+        self.lbl_stats = QLabel()
         self.lbl_stats.setStyleSheet("color: #4ade80; font-size: 11px; font-weight: bold;")
         layout.addWidget(self.lbl_stats)
 
         # Controls
         btn_layout = QHBoxLayout()
-        self.btn_pause = QPushButton("⏸ Pause")
-        self.btn_pause.setToolTip(Strings.Tooltips.PAUSE)
+        self.btn_pause = QPushButton()
         self.btn_pause.setStyleSheet(
             "background-color: #d97706; color: white; padding: 4px 8px; font-weight: bold; border-radius: 4px;"
         )
         self.btn_pause.clicked.connect(self._toggle_pause)
 
-        self.btn_stop = QPushButton("■ Stop")
-        self.btn_stop.setToolTip(Strings.Tooltips.STOP)
+        self.btn_stop = QPushButton()
         self.btn_stop.setStyleSheet(
             "background-color: #dc2626; color: white; padding: 4px 8px; font-weight: bold; border-radius: 4px;"
         )
         self.btn_stop.clicked.connect(self.stop_clicked.emit)
 
-        self.btn_next = QPushButton("Next ⏭")
-        self.btn_next.setToolTip(Strings.Tooltips.STEP_BY_STEP)
+        self.btn_next = QPushButton()
         self.btn_next.setStyleSheet(
             "background-color: #2563eb; color: white; padding: 4px 8px; font-weight: bold; border-radius: 4px;"
         )
@@ -146,11 +145,17 @@ class FloatingRunPanel(QWidget):
         btn_layout.addWidget(self.btn_next)
         layout.addLayout(btn_layout)
 
-        # Hotkey note
-        lbl_hotkey = QLabel("Emergency stop: F12")
-        lbl_hotkey.setStyleSheet("color: #ef4444; font-size: 10px; text-align: center;")
-        lbl_hotkey.setAlignment(Qt.AlignCenter)
-        layout.addWidget(lbl_hotkey)
+        # Emergency stop badge: the one thing a user must find instantly.
+        self.lbl_hotkey = QLabel()
+        self.lbl_hotkey.setObjectName("f12_badge")
+        self.lbl_hotkey.setStyleSheet(
+            "background-color: #dc2626; color: white; font-size: 13px; font-weight: bold; "
+            "border: 2px solid #fca5a5; border-radius: 6px; padding: 5px 10px;"
+        )
+        self.lbl_hotkey.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.lbl_hotkey)
+
+        self.retranslate_ui()
 
         # Place initially at top-right
         self._position_top_right()
@@ -195,18 +200,44 @@ class FloatingRunPanel(QWidget):
             else:
                 self._position_top_right()
 
+    def retranslate_ui(self) -> None:
+        """Re-apply labels in the active language (also used at construction)."""
+        self.lbl_title.setText(
+            Strings.RUN_PANEL_PAUSED if self._is_paused else Strings.RUN_PANEL_RUNNING
+        )
+        self.btn_pause.setText(f"▶ {Strings.RESUME}" if self._is_paused else f"⏸ {Strings.PAUSE}")
+        self.btn_pause.setToolTip(Strings.Tooltips.PAUSE)
+        self.btn_stop.setText(f"■ {Strings.STOP}")
+        self.btn_stop.setToolTip(Strings.Tooltips.STOP)
+        self.btn_next.setText(Strings.RUN_PANEL_NEXT)
+        self.btn_next.setToolTip(Strings.Tooltips.STEP_BY_STEP)
+        self.lbl_hotkey.setText(Strings.RUN_PANEL_F12)
+        self.set_speed_text(self._speed)
+        self._show_counts()
+
+    def _show_counts(self) -> None:
+        row, total, ok_cnt, failed_cnt = self._progress
+        self.lbl_row.setText(Strings.RUN_PANEL_ROW.format(row=row, total=total))
+        self.lbl_stats.setText(Strings.RUN_PANEL_STATS.format(ok=ok_cnt, failed=failed_cnt))
+
     def update_progress(
         self, row: int, total: int, step_desc: str, ok_cnt: int, failed_cnt: int
     ) -> None:
-        self.lbl_row.setText(f"Row {row} / {total}")
+        self._progress = (row, total, ok_cnt, failed_cnt)
+        self._show_counts()
         pct = int((row / max(1, total)) * 100)
         self.prog_bar.setValue(pct)
         self.lbl_step.setText(step_desc)
-        self.lbl_stats.setText(f"OK: {ok_cnt}  |  Failed: {failed_cnt}")
 
     def set_speed_text(self, speed: SpeedMode) -> None:
+        self._speed = speed
+        name = {
+            SpeedMode.NORMAL: Strings.SPEED_NORMAL,
+            SpeedMode.SLOW: Strings.SPEED_SLOW,
+            SpeedMode.VERY_SLOW: Strings.SPEED_VERY_SLOW,
+        }.get(speed, speed.value)
         extra = f" (+{speed.extra_seconds}s)" if speed.extra_seconds > 0 else ""
-        self.lbl_speed.setText(f"Speed: {speed.value}{extra}")
+        self.lbl_speed.setText(Strings.RUN_PANEL_SPEED.format(speed=f"{name}{extra}"))
 
     def set_step_by_step(self, enabled: bool) -> None:
         self.btn_next.setVisible(enabled)
@@ -214,14 +245,14 @@ class FloatingRunPanel(QWidget):
     def _toggle_pause(self) -> None:
         if not self._is_paused:
             self._is_paused = True
-            self.btn_pause.setText("▶ Resume")
-            self.lbl_title.setText("Stepwise ⏸ Paused")
+            self.btn_pause.setText(f"▶ {Strings.RESUME}")
+            self.lbl_title.setText(Strings.RUN_PANEL_PAUSED)
             self.lbl_title.setStyleSheet("font-weight: bold; font-size: 13px; color: #f59e0b;")
             self.pause_clicked.emit()
         else:
             self._is_paused = False
-            self.btn_pause.setText("⏸ Pause")
-            self.lbl_title.setText("Stepwise ▶ Running")
+            self.btn_pause.setText(f"⏸ {Strings.PAUSE}")
+            self.lbl_title.setText(Strings.RUN_PANEL_RUNNING)
             self.lbl_title.setStyleSheet("font-weight: bold; font-size: 13px; color: #38bdf8;")
             self.resume_clicked.emit()
 

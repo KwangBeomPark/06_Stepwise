@@ -13,6 +13,7 @@ Assembles:
 from __future__ import annotations
 
 import copy
+import json
 import os
 import tempfile
 import threading
@@ -43,9 +44,10 @@ from stepwise.core.app_paths import (
     load_user_settings,
     save_user_settings,
 )
-from stepwise.core.models import ActionItem, Macro
+from stepwise.core.models import ActionItem, DataSourceConfig, Macro
 from stepwise.core.package import load_package, save_package
 from stepwise.engine.errors import StepFailure
+from stepwise.engine.preflight import run_preflight_checks
 from stepwise.engine.runner import ExecutionCallbacks, RunSummary, run_macro
 from stepwise.engine.timing import ExecutionController, SpeedMode
 from stepwise.services.hotkeys import GlobalHotkeyManager
@@ -55,7 +57,7 @@ from stepwise.ui.action_tree import ActionTreeWidget
 from stepwise.ui.capture_overlay import CaptureOverlay
 from stepwise.ui.data_panel import DataPanel
 from stepwise.ui.macro_library import MacroLibraryPanel
-from stepwise.ui.preflight_dialog import PreflightDialog
+from stepwise.ui.preflight_dialog import PreflightDialog, localize_issue
 from stepwise.ui.properties_panel import PropertiesPanel
 from stepwise.ui.run_panel import FloatingRunPanel
 from stepwise.ui.run_summary import RunSummaryDialog
@@ -80,6 +82,7 @@ class ExecutionSnapshot:
     results_dir: str
     speed: SpeedMode
     start_row_index: int
+    end_row_index: int | None
     skip_setup: bool
     skip_cleanup: bool
     run_1_row: bool
@@ -122,6 +125,15 @@ class MainWindow(QMainWindow):
         self._retained_summaries: list[RunSummary] = []
         self._close_requested = False
         self._last_run_opts: dict[str, Any] = {}
+        self._saved_snapshot = self._macro_snapshot_json()
+
+        # "Test this step" countdown so the click/typing does not land on Stepwise itself
+        self._step_test_pending = False
+        self._step_test_action: ActionItem | None = None
+        self._step_test_remaining = 0
+        self._step_test_timer = QTimer(self)
+        self._step_test_timer.setInterval(1000)
+        self._step_test_timer.timeout.connect(self._on_step_test_tick)
 
         self._bridge = RunnerBridge()
         self._bridge.event.connect(self._on_runner_event, Qt.QueuedConnection)
@@ -171,6 +183,12 @@ class MainWindow(QMainWindow):
         self.btn_run.setToolTip(Strings.Tooltips.RUN)
         self.btn_run.clicked.connect(self._on_run_clicked)
         self.toolbar.addWidget(self.btn_run)
+
+        self.btn_test_1_row = QPushButton(Strings.TEST_1_ROW)
+        self.btn_test_1_row.setObjectName("btn_test_1_row")
+        self.btn_test_1_row.setToolTip(Strings.Tooltips.TEST_1_ROW)
+        self.btn_test_1_row.clicked.connect(self._on_test_1_row_clicked)
+        self.toolbar.addWidget(self.btn_test_1_row)
 
         self.btn_pause = QPushButton(f"⏸ {Strings.PAUSE}")
         self.btn_pause.setObjectName("btn_pause")
@@ -227,7 +245,10 @@ class MainWindow(QMainWindow):
 
         self.lib_panel = MacroLibraryPanel(self._library_dir)
         self.lib_panel.setMinimumWidth(180)
-        self.lib_panel.macro_selected.connect(self.load_macro_file)
+        self.lib_panel.macro_selected.connect(self._on_library_macro_selected)
+        self.lib_panel.macro_created.connect(self._on_macro_created)
+        self.lib_panel.before_create = self._confirm_new_macro
+        self.lib_panel.before_prompt = self._cancel_step_test
         self.main_splitter.addWidget(self.lib_panel)
 
         self.center_splitter = QSplitter(Qt.Vertical)
@@ -248,6 +269,7 @@ class MainWindow(QMainWindow):
         self.action_tree.request_duplicate_action.connect(self._on_request_duplicate_action)
         self.action_tree.request_move_up.connect(self._on_request_move_up)
         self.action_tree.request_move_down.connect(self._on_request_move_down)
+        self.action_tree.macro_modified.connect(self._update_window_title)
         tree_layout.addWidget(self.action_tree)
 
         action_btn_layout = QHBoxLayout()
@@ -309,6 +331,7 @@ class MainWindow(QMainWindow):
         self.data_panel = DataPanel()
         self.data_panel.setMinimumHeight(150)
         self.data_panel.data_loaded.connect(self._on_data_loaded)
+        self.data_panel.before_prompt = self._cancel_step_test
         self.data_panel.insert_variable_requested.connect(self._insert_variable_into_current_action)
         self.data_panel.row_status_override.connect(self._on_row_status_override)
         self.data_panel.run_only_row_requested.connect(self._on_run_only_row)
@@ -316,6 +339,7 @@ class MainWindow(QMainWindow):
 
         # Right Column: Properties Panel (Full-height vertical inspector)
         self.prop_panel = PropertiesPanel()
+        self.prop_panel.before_prompt = self._cancel_step_test
         self.prop_panel.property_changed.connect(self._on_property_changed)
         self.prop_panel.request_pick.connect(self._trigger_pick_overlay)
         self.prop_panel.request_pick_element.connect(self._trigger_element_pick_overlay)
@@ -324,7 +348,7 @@ class MainWindow(QMainWindow):
         self.prop_panel.request_open_data_file.connect(self.data_panel._on_choose_file)
         self.prop_panel.request_capture.connect(self._trigger_capture_overlay)
         self.prop_panel.request_show_crosshair.connect(self._show_screen_crosshair)
-        self.prop_panel.request_test_step.connect(self._test_single_action)
+        self.prop_panel.request_test_step.connect(self._request_step_test)
         self.prop_panel.request_test_match.connect(self._test_image_match)
         self.prop_panel.setMinimumWidth(320)
         self.main_splitter.addWidget(self.prop_panel)
@@ -365,6 +389,7 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage(Strings.STATUS_READY)
 
         self.action_tree.load_macro(self._current_macro)
+        self._update_run_button_text()
 
     def _setup_shortcuts(self) -> None:
         # Ctrl+S Save
@@ -385,6 +410,109 @@ class MainWindow(QMainWindow):
         act_pick_elem.triggered.connect(self._trigger_element_pick_overlay)
         self.addAction(act_pick_elem)
 
+        # F8 Pick coordinates / F9 Capture image (labels on the property buttons)
+        self.act_pick_coords = QAction("Pick Coordinates", self)
+        self.act_pick_coords.setShortcut(QKeySequence("F8"))
+        self.act_pick_coords.triggered.connect(self._on_pick_shortcut)
+        self.addAction(self.act_pick_coords)
+
+        self.act_capture_image = QAction("Capture Image", self)
+        self.act_capture_image.setShortcut(QKeySequence("F9"))
+        self.act_capture_image.triggered.connect(self._on_capture_shortcut)
+        self.addAction(self.act_capture_image)
+
+    def _shortcut_target(self, supported_types: tuple[str, ...], hint: str) -> bool:
+        if self._is_running or self._step_test_pending:
+            self.status_bar.showMessage(Strings.SHORTCUT_BLOCKED_RUNNING, 3000)
+            return False
+        act = self.prop_panel._current_action
+        if act is None or act.type not in supported_types:
+            self.status_bar.showMessage(hint, 3000)
+            return False
+        return True
+
+    def _on_pick_shortcut(self) -> None:
+        if self._shortcut_target(("click",), Strings.SHORTCUT_PICK_UNSUPPORTED):
+            self._trigger_pick_overlay()
+
+    def _on_capture_shortcut(self) -> None:
+        if self._shortcut_target(
+            ("click_image", "wait_image", "wait_image_gone"),
+            Strings.SHORTCUT_CAPTURE_UNSUPPORTED,
+        ):
+            self._trigger_capture_overlay()
+
+    # --- Unsaved changes tracking -------------------------------------------------
+
+    def _macro_snapshot_json(self) -> str:
+        return json.dumps(self._current_macro.to_dict(), sort_keys=True)
+
+    def _mark_saved(self) -> None:
+        self._saved_snapshot = self._macro_snapshot_json()
+        self._update_window_title()
+
+    def is_dirty(self) -> bool:
+        return self._macro_snapshot_json() != self._saved_snapshot
+
+    def _is_pristine_macro(self) -> bool:
+        """True for the untouched, never-saved macro Stepwise starts with."""
+        macro = self._current_macro
+        return (
+            self._current_macro_path is None
+            and not (macro.setup or macro.per_row or macro.cleanup)
+            and macro.name == Macro().name
+        )
+
+    def _update_window_title(self) -> None:
+        dirty = self.is_dirty()
+        if self._current_macro_path is None and not dirty:
+            self.setWindowTitle(Strings.APP_TITLE)
+            return
+        title = f"{Strings.APP_TITLE} - {self._current_macro.name}"
+        self.setWindowTitle(f"{title} *" if dirty else title)
+
+    def _prompt_unsaved_changes(self) -> QMessageBox.StandardButton:
+        return QMessageBox.question(
+            self,
+            Strings.UNSAVED_CHANGES_TITLE,
+            Strings.UNSAVED_CHANGES_MSG.format(name=self._current_macro.name),
+            QMessageBox.StandardButton.Save
+            | QMessageBox.StandardButton.Discard
+            | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Save,
+        )
+
+    def _confirm_discard_changes(self) -> bool:
+        """Return True when it is safe to replace or close the current macro."""
+        if not self.is_dirty():
+            return True
+        choice = self._prompt_unsaved_changes()
+        if choice == QMessageBox.StandardButton.Save:
+            return self.save_current_macro()
+        return choice == QMessageBox.StandardButton.Discard
+
+    def _on_library_macro_selected(self, swm_path: str) -> None:
+        # Stop a pending step test before any modal prompt can let its timer fire.
+        self._cancel_step_test()
+        if self._is_running:
+            self.lib_panel.select_path(self._current_macro_path, emit=False)
+            return
+        if not self._confirm_discard_changes():
+            self.lib_panel.select_path(self._current_macro_path, emit=False)
+            return
+        self.load_macro_file(swm_path)
+
+    def _confirm_new_macro(self) -> bool:
+        """Asked by the library before it writes a new macro file to disk."""
+        self._cancel_step_test()
+        if self._is_running:
+            return False
+        return self._confirm_discard_changes()
+
+    def _on_macro_created(self, swm_path: str) -> None:
+        # The unsaved-changes prompt already ran in _confirm_new_macro.
+        self.load_macro_file(swm_path)
+
     def _update_status_bar_screen_info(self) -> None:
         t = get_theme_tokens()
         screen = get_screen_info()
@@ -399,6 +527,7 @@ class MainWindow(QMainWindow):
             self.lbl_screen_info.setStyleSheet(f"color: {t['status_fail']}; font-weight: bold;")
 
     def load_macro_file(self, swm_path: str) -> None:
+        self._cancel_step_test()
         if self._is_running:
             return
         package_temp = tempfile.TemporaryDirectory(prefix="stepwise_pkg_")
@@ -419,20 +548,27 @@ class MainWindow(QMainWindow):
             self.action_tree.load_macro(macro)
             self.action_tree.set_data_row_count(len(self._data_rows))
             self._update_status_bar_screen_info()
-            self.setWindowTitle(f"{macro.name} — {Strings.APP_TITLE}")
+            self._cancel_step_test()
+            self._mark_saved()
+            self.data_panel.set_reconnect_hint(
+                None if self._data_filepath else self._recent_data_file(swm_path)
+            )
+            # Saving A while switching to B re-selects A; keep the list on the open macro.
+            self.lib_panel.select_path(swm_path, emit=False)
             self.status_bar.showMessage(f"Loaded: {macro.name}")
         except Exception as e:
             package_temp.cleanup()
             QMessageBox.critical(self, "Load Error", f"Failed to load macro:\n{e}")
 
-    def save_current_macro(self) -> None:
+    def save_current_macro(self) -> bool:
+        self._cancel_step_test()
         path = self._current_macro_path
         if not path:
             path, _ = QFileDialog.getSaveFileName(
                 self, "Save Macro", self._library_dir, "Stepwise Macro (*.swm)"
             )
             if not path:
-                return
+                return False
         try:
             macro_snapshot = copy.deepcopy(self._current_macro)
             image_files: dict[str, bytes] = {}
@@ -441,10 +577,15 @@ class MainWindow(QMainWindow):
             save_package(macro_snapshot, path, image_files=image_files)
         except Exception as e:
             QMessageBox.warning(self, Strings.SAVE_ERROR_TITLE, Strings.SAVE_ERROR.format(error=e))
-            return
+            return False
         self._current_macro_path = path
+        self._mark_saved()
+        if self._data_filepath:
+            self._remember_data_file(self._data_filepath)
         self.lib_panel.refresh_list()
+        self.lib_panel.select_path(path, emit=False)
         self.status_bar.showMessage(f"Saved: {os.path.basename(self._current_macro_path)}")
+        return True
 
     def _collect_package_images(
         self, actions: list[ActionItem], image_files: dict[str, bytes]
@@ -479,6 +620,7 @@ class MainWindow(QMainWindow):
 
     def _on_property_changed(self) -> None:
         self.action_tree.rebuild_tree()
+        self._update_window_title()
 
     def _add_quick_action(self, act_type: str) -> None:
         sec_name, parent, idx = self.action_tree.get_current_insertion_target()
@@ -498,6 +640,7 @@ class MainWindow(QMainWindow):
         idx = min(max(0, index), len(target_list))
         target_list.insert(idx, new_act)
         self.action_tree.rebuild_tree(select_id=new_act.id)
+        self._update_window_title()
         self.status_bar.showMessage(f"Added {act_type} to {section.upper()}")
 
     def _on_request_move_section(self, action: ActionItem, target_section: str) -> None:
@@ -508,9 +651,11 @@ class MainWindow(QMainWindow):
         target_list = getattr(self._current_macro, target_section)
         target_list.append(action)
         self.action_tree.rebuild_tree(select_id=action.id)
+        self._update_window_title()
         self.status_bar.showMessage(f"Moved step to {target_section.upper()}")
 
     def _on_request_delete_action(self, action: ActionItem) -> None:
+        self._cancel_step_test()
         location = self._current_macro.find_action_location(action)
         if location is None:
             return
@@ -522,6 +667,7 @@ class MainWindow(QMainWindow):
         else:
             next_select_id = f"empty_{location.section}"
         self.action_tree.rebuild_tree(select_id=next_select_id)
+        self._update_window_title()
         self.status_bar.showMessage("Deleted step")
 
     def _on_request_duplicate_action(self, action: ActionItem) -> None:
@@ -538,6 +684,7 @@ class MainWindow(QMainWindow):
         renew_ids(new_act)
         location.items.insert(location.index + 1, new_act)
         self.action_tree.rebuild_tree(select_id=new_act.id)
+        self._update_window_title()
         self.status_bar.showMessage(f"Duplicated {action.type} step")
 
     def _on_move_up_clicked(self) -> None:
@@ -569,6 +716,7 @@ class MainWindow(QMainWindow):
             return
         items[index], items[target] = items[target], items[index]
         self.action_tree.rebuild_tree(select_id=action.id)
+        self._update_window_title()
         self.status_bar.showMessage("Moved step up" if offset < 0 else "Moved step down")
 
     def _locate_target_only(self, action: ActionItem) -> None:
@@ -587,6 +735,54 @@ class MainWindow(QMainWindow):
     def _show_screen_crosshair(self, x: int, y: int) -> None:
         self._crosshair_overlay = ScreenCrosshairOverlay(x, y)
         self.status_bar.showMessage(f"Displaying target coordinate ({x}, {y}) on screen (1.5s)...")
+
+    def _request_step_test(self, action: ActionItem) -> None:
+        """Count down before testing a step so input lands on the target window."""
+        if self._is_running:
+            return
+        if self._step_test_pending:
+            self.status_bar.showMessage(Strings.STEP_TEST_BUSY, 2000)
+            return
+        seconds = int(float(self._user_settings.get("countdown_seconds", 3) or 0))
+        if seconds <= 0:
+            self._test_single_action(action)
+            return
+        self._step_test_pending = True
+        self._step_test_action = action
+        self._step_test_remaining = seconds
+        self.status_bar.showMessage(Strings.STEP_TEST_COUNTDOWN.format(seconds=seconds))
+        self._step_test_timer.start()
+
+    def _on_step_test_tick(self) -> None:
+        if (
+            QApplication.activeModalWidget() is not None
+            or QApplication.activePopupWidget() is not None
+        ):
+            # A dialog or menu opened during the countdown: never send input into it.
+            self._cancel_step_test()
+            self.status_bar.showMessage(Strings.STEP_TEST_CANCELLED_DIALOG, 3000)
+            return
+        self._step_test_remaining -= 1
+        if self._step_test_remaining > 0:
+            self.status_bar.showMessage(
+                Strings.STEP_TEST_COUNTDOWN.format(seconds=self._step_test_remaining)
+            )
+            return
+        action = self._step_test_action
+        self._cancel_step_test()
+        if action is None:
+            return
+        if self._current_macro.find_action_location(action) is None:
+            # The step was deleted (or another macro was opened) during the countdown.
+            self.status_bar.showMessage(Strings.STEP_TEST_CANCELLED, 3000)
+            return
+        self._test_single_action(action)
+
+    def _cancel_step_test(self) -> None:
+        self._step_test_timer.stop()
+        self._step_test_pending = False
+        self._step_test_action = None
+        self._step_test_remaining = 0
 
     def _test_single_action(self, action: ActionItem) -> None:
         if self._is_running:
@@ -620,6 +816,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Step Test Failed", f"Execution error:\n{e}")
 
     def _test_image_match(self, action: ActionItem) -> None:
+        self._cancel_step_test()
         if not action.image:
             QMessageBox.warning(
                 self, "Image Match Test", "No template image specified for this action."
@@ -678,6 +875,7 @@ class MainWindow(QMainWindow):
         rows: list[dict[str, str]],
         row_nums: list[int] | None = None,
     ) -> None:
+        pristine = self._is_pristine_macro()
         self._data_filepath = filepath
         self._data_headers = headers
         self._data_rows = rows
@@ -687,9 +885,48 @@ class MainWindow(QMainWindow):
         sample_row = rows[0] if rows else {}
         self.prop_panel.update_variable_completions(headers, sample_row=sample_row)
         self.action_tree.set_data_row_count(len(rows))
-        self.status_bar.showMessage(
-            f"Connected data: {os.path.basename(filepath)} ({len(rows)} rows)"
-        )
+
+        file_hint = os.path.basename(filepath)
+        if self._current_macro.data_source is None:
+            ext = os.path.splitext(filepath)[1].lower()
+            self._current_macro.data_source = DataSourceConfig(
+                type="csv" if ext == ".csv" else "xlsx"
+            )
+        self._current_macro.data_source.file_hint = file_hint
+        self._remember_data_file(filepath)
+        if pristine:
+            # Just previewing data in the blank start-up macro is not an edit.
+            self._mark_saved()
+        else:
+            self._update_window_title()
+        self._update_run_button_text()
+        self.status_bar.showMessage(f"Connected data: {file_hint} ({len(rows)} rows)")
+
+    @staticmethod
+    def _macro_key(swm_path: str) -> str:
+        return os.path.normcase(os.path.abspath(swm_path))
+
+    def _remember_data_file(self, filepath: str) -> None:
+        """Remember the last data file per saved macro (offered later as [Reconnect])."""
+        if not self._current_macro_path or not os.path.isabs(filepath):
+            return
+        recent = dict(self._user_settings.get("recent_data_files") or {})
+        key = self._macro_key(self._current_macro_path)
+        if recent.get(key) == filepath:
+            return
+        recent.pop(key, None)
+        recent[key] = filepath
+        # Keep the settings file small: only the most recent entries survive.
+        self._user_settings["recent_data_files"] = dict(list(recent.items())[-30:])
+        try:
+            save_user_settings(self._user_settings)
+        except OSError:
+            pass
+
+    def _recent_data_file(self, swm_path: str) -> str | None:
+        recent = self._user_settings.get("recent_data_files") or {}
+        path = recent.get(self._macro_key(swm_path)) if isinstance(recent, dict) else None
+        return path if isinstance(path, str) and os.path.isfile(path) else None
 
     def _on_row_status_override(self, row_num: int, new_status: str) -> None:
         self.status_bar.showMessage(f"Row #{row_num} marked as {new_status}")
@@ -712,15 +949,66 @@ class MainWindow(QMainWindow):
             "skip_cleanup": False,
             "step_by_step": False,
             "run_1_row": True,
+            "countdown_seconds": float(self._user_settings.get("countdown_seconds", 3.0)),
         }
         self._start_execution(opts)
 
-    def _insert_variable_into_current_action(self, var_text: str) -> None:
+    def _update_run_button_text(self) -> None:
+        n = len(self._data_rows)
+        if n:
+            self.btn_run.setText(f"▶ {Strings.RUN} ({Strings.RUN_ROW_COUNT.format(n=n)})")
+        else:
+            self.btn_run.setText(f"▶ {Strings.RUN}")
+
+    def _on_test_1_row_clicked(self) -> None:
+        """Run only one data row (the selected one, else the first) after a countdown."""
+        if self._is_running:
+            return
+        self._cancel_step_test()
+        row_index = 0
+        if self._data_rows:
+            selected = self.data_panel.table.currentRow()
+            if 0 <= selected < len(self._data_rows):
+                row_index = selected
+        rows = [self._data_rows[row_index]] if self._data_rows else None
+        row_nums = [self._data_row_nums[row_index]] if self._data_rows else None
+        blocking = [
+            issue
+            for issue in run_preflight_checks(
+                macro=self._current_macro,
+                rows_data=rows,
+                row_numbers=row_nums,
+                package_dir=self._package_dir,
+                headers=self._data_headers,
+            )
+            if issue.is_error
+        ]
+        if blocking:
+            details = "\n".join(f"• {localize_issue(issue)[0]}" for issue in blocking[:5])
+            QMessageBox.warning(
+                self, Strings.TEST_1_ROW_BLOCKED_TITLE, Strings.TEST_1_ROW_BLOCKED.format(issues=details)
+            )
+            return
+        opts = {
+            "start_row": row_index + 1,
+            "speed": SpeedMode.NORMAL,
+            "skip_setup": False,
+            "skip_cleanup": False,
+            "step_by_step": False,
+            "run_1_row": True,
+            "countdown_seconds": float(self._user_settings.get("countdown_seconds", 3) or 0),
+        }
+        self._start_execution(opts)
+
+    def _insert_variable_into_current_action(self, col_name: str) -> None:
         act = self.prop_panel._current_action
-        if act and act.type == "type_text":
-            act.text += var_text
-            self.prop_panel.set_action(act)
-            self.action_tree.rebuild_tree()
+        if act is None or act.type != "type_text":
+            self.status_bar.showMessage(Strings.SELECT_TYPE_TEXT_FIRST, 3000)
+            return
+        # Data panel emits "{Column}"; the properties panel adds the braces itself.
+        if col_name.startswith("{") and col_name.endswith("}"):
+            col_name = col_name[1:-1]
+        self.prop_panel._insert_column_token(col_name)
 
     def _trigger_pick_overlay(self) -> None:
         act = self.prop_panel._current_action
@@ -763,6 +1051,7 @@ class MainWindow(QMainWindow):
         self.overlay.show()
 
     def _validate_and_highlight_selector(self, action: ActionItem) -> None:
+        self._cancel_step_test()
         if not action.selector:
             QMessageBox.information(
                 self,
@@ -811,6 +1100,7 @@ class MainWindow(QMainWindow):
         self.overlay.show()
 
     def _open_settings(self) -> None:
+        self._cancel_step_test()
         dlg = SettingsDialog(parent=self)
         if dlg.exec() == SettingsDialog.Accepted:
             self._user_settings = load_user_settings()
@@ -848,8 +1138,10 @@ class MainWindow(QMainWindow):
     def retranslate_ui(self) -> None:
         """Refresh all UI labels, tooltips, and theme colors across MainWindow and child panels."""
         t = get_theme_tokens()
-        self.btn_run.setText(f"▶ {Strings.RUN}")
+        self._update_run_button_text()
         self.btn_run.setToolTip(Strings.Tooltips.RUN)
+        self.btn_test_1_row.setText(Strings.TEST_1_ROW)
+        self.btn_test_1_row.setToolTip(Strings.Tooltips.TEST_1_ROW)
         self.btn_pause.setText(f"⏸ {Strings.PAUSE}")
         self.btn_pause.setToolTip(Strings.Tooltips.PAUSE)
         self.btn_stop.setText(f"■ {Strings.STOP}")
@@ -889,11 +1181,13 @@ class MainWindow(QMainWindow):
         self.action_tree.retranslate_ui()
         self.data_panel.retranslate_ui()
         self.prop_panel.retranslate_ui()
+        self.floating_panel.retranslate_ui()
         self._setup_menu_bar()
 
     def _open_scheduler(self) -> None:
         if self._is_running:
             return
+        self._cancel_step_test()
         dlg = SchedulerDialog(
             macro=self._current_macro,
             rows_data=self._data_rows,
@@ -909,6 +1203,7 @@ class MainWindow(QMainWindow):
     def _on_run_clicked(self) -> None:
         if self._is_running:
             return
+        self._cancel_step_test()
         self._is_running = True
         self._execution_phase = "preflight"
         try:
@@ -925,9 +1220,11 @@ class MainWindow(QMainWindow):
             macro=self._current_macro,
             rows_data=self._data_rows,
             row_numbers=self._data_row_nums,
+            headers=self._data_headers,
             package_dir=self._package_dir,
             data_file_path=self._data_filepath,
             results_dir=str(self._user_settings.get("results_dir") or default_results_directory()),
+            countdown_seconds=self._user_settings.get("countdown_seconds", 3),
             parent=self,
         )
         if dlg.exec() != PreflightDialog.Accepted:
@@ -958,8 +1255,11 @@ class MainWindow(QMainWindow):
     def _start_execution(self, opts: dict[str, Any]) -> None:
         if self._is_running or (self._worker_thread and self._worker_thread.is_alive()):
             return
+        self._cancel_step_test()
         self._is_running = True
         self._execution_phase = "starting"
+        # Swapping the data mid-run would desync row statuses and later retries.
+        self.data_panel.set_running(True)
         run_token = str(uuid.uuid4())
         self._run_token = run_token
         self._pending_summary = None
@@ -970,9 +1270,12 @@ class MainWindow(QMainWindow):
             if "custom_rows" in opts and "custom_row_nums" in opts:
                 rows_snapshot = copy.deepcopy(opts["custom_rows"])
                 row_nums_snapshot = copy.deepcopy(opts["custom_row_nums"])
+                # Retry rows are already trimmed; slicing them again would drop rows.
+                end_row_index = None
             else:
                 rows_snapshot = copy.deepcopy(self._data_rows)
                 row_nums_snapshot = copy.deepcopy(self._data_row_nums)
+                end_row_index = opts.get("end_row_index")
             opts = copy.deepcopy(opts)
             self._last_run_opts = opts
             snapshot = ExecutionSnapshot(
@@ -984,6 +1287,7 @@ class MainWindow(QMainWindow):
                 results_dir=str(self._user_settings.get("results_dir") or default_results_directory()),
                 speed=opts.get("speed", SpeedMode.NORMAL),
                 start_row_index=max(0, opts.get("start_row", 1) - 1),
+                end_row_index=int(end_row_index) if end_row_index is not None else None,
                 skip_setup=opts.get("skip_setup", False),
                 skip_cleanup=opts.get("skip_cleanup", False),
                 run_1_row=opts.get("run_1_row", False),
@@ -1019,6 +1323,7 @@ class MainWindow(QMainWindow):
             return
 
         self.btn_run.setEnabled(False)
+        self.btn_test_1_row.setEnabled(False)
         self.btn_pause.setEnabled(True)
         self.btn_stop.setEnabled(True)
 
@@ -1052,6 +1357,7 @@ class MainWindow(QMainWindow):
                     skip_cleanup=snapshot.skip_cleanup,
                     run_1_row=snapshot.run_1_row,
                     start_row_index=snapshot.start_row_index,
+                    end_row_index=snapshot.end_row_index,
                     package_dir=snapshot.package_dir,
                     countdown_seconds=snapshot.countdown_seconds,
                     data_filepath=snapshot.data_filepath,
@@ -1139,15 +1445,30 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage("No failed rows to retry.")
             return
 
-        first_fail = failed_row_numbers[0]
-        # Resume from first failed row to the end so subsequent rows are not skipped
+        first_fail = min(failed_row_numbers)
+        # Resume from the first failed row, but never past the range the user chose:
+        # a previous retry keeps its own row set, otherwise honour its end row.
+        prev = self._last_run_opts or {}
+        prev_row_nums = prev.get("custom_row_nums")
+        allowed = set(prev_row_nums) if prev_row_nums else None
+        prev_end = None
+        if allowed is None:
+            if prev.get("run_1_row"):
+                prev_end = prev.get("start_row", 1)
+            else:
+                prev_end = prev.get("end_row_index")
         retry_rows: list[dict[str, str]] = []
         retry_row_nums: list[int] = []
         for idx, r_num in enumerate(self._data_row_nums):
+            if idx >= len(self._data_rows):
+                break
+            if prev_end is not None and idx >= int(prev_end):
+                break
+            if allowed is not None and r_num not in allowed:
+                continue
             if r_num >= first_fail:
-                if idx < len(self._data_rows):
-                    retry_rows.append(self._data_rows[idx])
-                    retry_row_nums.append(r_num)
+                retry_rows.append(self._data_rows[idx])
+                retry_row_nums.append(r_num)
 
         if not retry_rows:
             return
@@ -1156,17 +1477,21 @@ class MainWindow(QMainWindow):
         opts = copy.deepcopy(self._last_run_opts) if self._last_run_opts else {}
         opts.pop("scheduled", None)
         opts.pop("lock_after", None)
+        opts.pop("end_row_index", None)
+        countdown = float(self._user_settings.get("countdown_seconds", 3) or 0)
         opts.update(
             {
                 "start_row": 1,
                 "run_1_row": False,
                 "custom_rows": retry_rows,
                 "custom_row_nums": retry_row_nums,
-                "countdown_seconds": 3.0,
+                "countdown_seconds": countdown,
             }
         )
         self.status_bar.showMessage(
-            f"Resuming from row #{first_fail} to end ({len(retry_rows)} rows remaining, starting in 3s)..."
+            Strings.RETRY_FAILED_STATUS.format(
+                count=len(retry_rows), row=retry_row_nums[0], sec=f"{countdown:g}"
+            )
         )
         self._start_execution(opts)
 
@@ -1196,13 +1521,13 @@ class MainWindow(QMainWindow):
     def _on_engine_run_started(self, run_id: str, total_rows: int) -> None:
         self._run_total_rows = total_rows
         self._run_row_index = 0
-        self.floating_panel.update_progress(0, total_rows, "Starting run...", 0, 0)
+        self.floating_panel.update_progress(0, total_rows, Strings.RUN_PANEL_STARTING, 0, 0)
 
     def _on_engine_row_started(self, row_num: int, row_data: dict) -> None:
         self._run_row_index += 1
         tot = max(1, self._run_total_rows)
         self.floating_panel.update_progress(
-            self._run_row_index, tot, f"Executing row {row_num}", 0, 0
+            self._run_row_index, tot, Strings.RUN_PANEL_EXECUTING_ROW.format(row=row_num), 0, 0
         )
         self.data_panel.update_row_status(row_num, Strings.STATUS_RUNNING)
 
@@ -1241,14 +1566,22 @@ class MainWindow(QMainWindow):
             self._is_running = False
             self._execution_phase = "idle"
             self.floating_panel.hide()
+            self.data_panel.set_running(False)
             self.btn_run.setEnabled(True)
+            self.btn_test_1_row.setEnabled(True)
             self.btn_pause.setEnabled(False)
             self.btn_stop.setEnabled(False)
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        self._cancel_step_test()
         if self._is_running:
             self._close_requested = True
             self._stop_run()
+            event.ignore()
+            return
+
+        if not self._confirm_discard_changes():
+            self._close_requested = False
             event.ignore()
             return
 
@@ -1315,7 +1648,9 @@ class MainWindow(QMainWindow):
 
     def _open_results_folder(self) -> None:
         try:
-            os.startfile(str(self._results_dir))
+            res_dir = self._user_settings.get("results_dir") or str(default_results_directory())
+            os.makedirs(res_dir, exist_ok=True)
+            os.startfile(str(res_dir))
         except Exception:
             QMessageBox.warning(self, Strings.SAVE_ERROR_TITLE, Strings.FOLDER_OPEN_FAILED)
 
@@ -1325,6 +1660,7 @@ class MainWindow(QMainWindow):
         from stepwise.services.updater import RateLimitError, fetch_latest_release
         from stepwise.ui.update_dialog import UpdateDialog
 
+        self._cancel_step_test()
         try:
             release_info, status = fetch_latest_release(force=True)
             if status == "update_available" and release_info:

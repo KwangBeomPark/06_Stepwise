@@ -6,21 +6,26 @@ Features:
 - Canonical status code decoupling from localized display text
 - Row context menu (Retry, Skip, Mark as Done, Run only this row)
 - Header click emits variable placeholder for text input
+- Drag & drop of a single .xlsx/.csv file, empty-state hint and reconnect button
 """
 
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 
 from PySide6.QtCore import QPoint, Qt, Signal
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QFileDialog,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QMenu,
+    QMessageBox,
     QPushButton,
+    QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -30,6 +35,8 @@ from PySide6.QtWidgets import (
 from stepwise.services.data_source import read_data_file
 from stepwise.ui.strings import Strings, format_status_display, normalize_status_code
 from stepwise.ui.theme import get_theme_tokens
+
+DATA_FILE_EXTENSIONS = (".xlsx", ".csv")
 
 
 class DataPanel(QWidget):
@@ -46,6 +53,11 @@ class DataPanel(QWidget):
         self._row_numbers: list[int] = []
         # Stores canonical status code ('Pending', 'Done', 'Failed', 'Running', 'Interrupted', 'Skipped')
         self._row_statuses: dict[int, str] = {}
+        self._reconnect_path: str | None = None
+        self._running = False
+        # Optional hook run before the file dialog opens (e.g. to cancel pending input).
+        self.before_prompt: Callable[[], None] | None = None
+        self.setAcceptDrops(True)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
@@ -56,9 +68,13 @@ class DataPanel(QWidget):
         self.btn_select_file = QPushButton(Strings.SELECT_DATA_FILE)
         self.btn_select_file.setToolTip(Strings.Tooltips.CHOOSE_DATA_FILE)
         self.btn_select_file.clicked.connect(self._on_choose_file)
+        self.btn_reconnect = QPushButton()
+        self.btn_reconnect.clicked.connect(self._on_reconnect_clicked)
+        self.btn_reconnect.hide()
         self.lbl_info = QLabel(Strings.NO_DATA)
 
         top_layout.addWidget(self.btn_select_file)
+        top_layout.addWidget(self.btn_reconnect)
         top_layout.addWidget(self.lbl_info)
         top_layout.addStretch()
         layout.addLayout(top_layout)
@@ -73,13 +89,22 @@ class DataPanel(QWidget):
         self.chips_widget.hide()
         layout.addWidget(self.chips_widget)
 
-        # Table
+        # Empty-state hint (page 0) and table (page 1)
+        self.stack = QStackedWidget()
+        self.lbl_empty = QLabel(Strings.DATA_DROP_HINT)
+        self.lbl_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_empty.setWordWrap(True)
+        self.stack.addWidget(self.lbl_empty)
+
+        # Table (read-only preview: the source file is never modified)
         self.table = QTableWidget()
         self.table.setAlternatingRowColors(True)
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._show_context_menu)
         self.table.horizontalHeader().sectionClicked.connect(self._on_header_clicked)
-        layout.addWidget(self.table)
+        self.stack.addWidget(self.table)
+        layout.addWidget(self.stack)
 
         self._apply_theme_styles()
 
@@ -87,23 +112,41 @@ class DataPanel(QWidget):
         t = get_theme_tokens()
         self.lbl_info.setStyleSheet(f"color: {t['text_muted']}; font-weight: 500;")
         self.lbl_chips_title.setStyleSheet(f"font-weight: bold; color: {t['text_muted']};")
+        self.lbl_empty.setStyleSheet(
+            f"color: {t['text_secondary']}; font-size: 14px; padding: 16px; "
+            f"border: 2px dashed {t['chip_border']}; border-radius: 8px;"
+        )
 
     def retranslate_ui(self) -> None:
         """Update labels, chips, and table status strings on language/theme switch."""
         self.btn_select_file.setText(Strings.SELECT_DATA_FILE)
         self.btn_select_file.setToolTip(Strings.Tooltips.CHOOSE_DATA_FILE)
         self.lbl_chips_title.setText(Strings.INSERT_VARIABLE_LABEL)
+        self.lbl_empty.setText(Strings.DATA_DROP_HINT)
         self._apply_theme_styles()
+        self.set_reconnect_hint(self._reconnect_path)
         if not self._current_filepath:
             self.lbl_info.setText(Strings.NO_DATA)
         else:
-            rows_str = Strings.ROWS_LOADED.format(count=len(self._rows))
-            self.lbl_info.setText(f"{os.path.basename(self._current_filepath)} ({rows_str})")
+            self.lbl_info.setText(self._loaded_summary())
         if self._headers:
             self._rebuild_chips()
             self._rebuild_table()
 
+    def set_running(self, running: bool) -> None:
+        """Lock the data source while a run uses it (drop, choose and reconnect)."""
+        self._running = running
+        self.btn_select_file.setEnabled(not running)
+        self.btn_reconnect.setEnabled(not running)
+        if not running and self._current_filepath:
+            self.lbl_info.setText(self._loaded_summary())
+
     def _on_choose_file(self) -> None:
+        if self._running:
+            self.lbl_info.setText(Strings.DATA_LOCKED_RUNNING)
+            return
+        if self.before_prompt is not None:
+            self.before_prompt()
         path, _ = QFileDialog.getOpenFileName(
             self,
             Strings.SELECT_DATA_FILE,
@@ -113,23 +156,94 @@ class DataPanel(QWidget):
         if path:
             self.load_file(path)
 
-    def load_file(self, filepath: str) -> None:
-        """Load xlsx or csv file into table."""
+    def load_file(self, filepath: str) -> bool:
+        """Load xlsx or csv file into table. A failure keeps the previous data."""
+        name = os.path.basename(filepath)
         try:
             headers, rows, row_nums = read_data_file(filepath)
-            self._current_filepath = filepath
-            self._headers = headers
-            self._rows = rows
-            self._row_numbers = row_nums
-            self._row_statuses.clear()
-
-            self._rebuild_table()
-            self._rebuild_chips()
-            rows_str = Strings.ROWS_LOADED.format(count=len(rows))
-            self.lbl_info.setText(f"{os.path.basename(filepath)} ({rows_str})")
-            self.data_loaded.emit(filepath, headers, rows, self._row_numbers)
         except Exception as e:
-            self.lbl_info.setText(f"Error loading file: {e}")
+            if isinstance(e, PermissionError):
+                message = Strings.DATA_LOAD_PERMISSION_ERROR.format(file=name)
+            else:
+                message = Strings.DATA_LOAD_ERROR.format(file=name, error=e)
+            status = Strings.DATA_LOAD_FAILED_STATUS.format(file=name)
+            if self._current_filepath:
+                status += "  " + Strings.DATA_KEEP_PREVIOUS.format(
+                    file=os.path.basename(self._current_filepath)
+                )
+            self.lbl_info.setText(status)
+            if self.before_prompt is not None:
+                self.before_prompt()
+            QMessageBox.warning(self, Strings.DATA_LOAD_ERROR_TITLE, message)
+            return False
+
+        self._current_filepath = filepath
+        self._headers = headers
+        self._rows = rows
+        self._row_numbers = row_nums
+        self._row_statuses.clear()
+
+        self._rebuild_table()
+        self._rebuild_chips()
+        self.set_reconnect_hint(None)
+        self.lbl_info.setText(self._loaded_summary())
+        self.data_loaded.emit(filepath, headers, rows, self._row_numbers)
+        return True
+
+    def _loaded_summary(self) -> str:
+        return Strings.DATA_LOADED_SUMMARY.format(
+            file=os.path.basename(self._current_filepath or ""),
+            rows=len(self._rows),
+            cols=len(self._headers),
+        )
+
+    def set_reconnect_hint(self, filepath: str | None) -> None:
+        """Offer a one-click reconnect to the last data file; never loads silently."""
+        self._reconnect_path = filepath
+        if filepath and not self._current_filepath and os.path.isfile(filepath):
+            self.btn_reconnect.setText(
+                Strings.DATA_RECONNECT.format(file=os.path.basename(filepath))
+            )
+            self.btn_reconnect.setToolTip(filepath)
+            self.btn_reconnect.show()
+        else:
+            self.btn_reconnect.hide()
+
+    def _on_reconnect_clicked(self) -> None:
+        if self._running:
+            return
+        if self._reconnect_path:
+            self.load_file(self._reconnect_path)
+
+    @staticmethod
+    def _dropped_data_file(event: QDragEnterEvent | QDropEvent) -> str | None:
+        mime = event.mimeData()
+        urls = mime.urls() if mime.hasUrls() else []
+        if len(urls) != 1 or not urls[0].isLocalFile():
+            return None
+        path = urls[0].toLocalFile()
+        if not path.lower().endswith(DATA_FILE_EXTENSIONS):
+            return None
+        return path
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        if not self._running and self._dropped_data_file(event):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event: QDropEvent) -> None:
+        if self._running:
+            self.lbl_info.setText(Strings.DATA_LOCKED_RUNNING)
+            event.ignore()
+            return
+        path = self._dropped_data_file(event)
+        if not path:
+            self.lbl_info.setText(Strings.DATA_DROP_UNSUPPORTED)
+            event.ignore()
+            return
+        event.acceptProposedAction()
+        self.load_file(path)
 
     def _rebuild_chips(self) -> None:
         """Create clickable chip buttons for each column header."""
@@ -185,6 +299,7 @@ class DataPanel(QWidget):
 
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.stack.setCurrentWidget(self.table)
 
     def get_failed_row_numbers(self) -> list[int]:
         """Return list of row numbers whose current canonical status is 'Failed'."""

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import shutil
+from collections.abc import Callable
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QBrush, QColor
@@ -21,6 +22,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -41,6 +43,10 @@ class MacroLibraryPanel(QWidget):
         super().__init__(parent)
         self.library_dir = library_dir
         os.makedirs(self.library_dir, exist_ok=True)
+        # Optional guard asked right before a new macro file is written.
+        self.before_create: Callable[[], bool] | None = None
+        # Optional hook run before the name prompt opens (e.g. to cancel pending input).
+        self.before_prompt: Callable[[], None] | None = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
@@ -120,6 +126,25 @@ class MacroLibraryPanel(QWidget):
 
                 self.list_widget.addItem(item)
 
+    def select_path(self, swm_path: str | None, emit: bool = True) -> bool:
+        """Select the list item for swm_path. With emit=False no load is triggered."""
+        target = os.path.normcase(os.path.abspath(swm_path)) if swm_path else None
+        match = None
+        for idx in range(self.list_widget.count()):
+            item = self.list_widget.item(idx)
+            if target and os.path.normcase(os.path.abspath(item.data(Qt.UserRole))) == target:
+                match = item
+                break
+        blocked = self.list_widget.blockSignals(not emit)
+        try:
+            if match is not None:
+                self.list_widget.setCurrentItem(match)
+            else:
+                self.list_widget.clearSelection()
+        finally:
+            self.list_widget.blockSignals(blocked)
+        return match is not None
+
     def _filter_list(self, query: str) -> None:
         q = query.strip().lower()
         for idx in range(self.list_widget.count()):
@@ -133,10 +158,22 @@ class MacroLibraryPanel(QWidget):
             self.macro_selected.emit(swm_path)
 
     def _on_new_macro(self) -> None:
-        name, ok = QInputDialog.getText(self, Strings.NEW_MACRO, "Enter macro name:")
+        if self.before_prompt is not None:
+            self.before_prompt()
+        name, ok = QInputDialog.getText(self, Strings.NEW_MACRO, Strings.NEW_MACRO_PROMPT)
         if ok and name.strip():
             safe_name = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in name.strip())
             swm_path = os.path.join(self.library_dir, f"{safe_name}.swm")
+            if os.path.exists(swm_path):
+                QMessageBox.warning(
+                    self,
+                    Strings.MACRO_EXISTS_TITLE,
+                    Strings.MACRO_EXISTS_MSG.format(name=f"{safe_name}.swm"),
+                )
+                return
+            # Let the owner resolve unsaved edits first; on Cancel nothing is written.
+            if self.before_create is not None and not self.before_create():
+                return
             macro = Macro(name=name.strip())
             save_package(macro, swm_path)
             self.refresh_list()

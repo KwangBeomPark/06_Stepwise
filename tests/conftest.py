@@ -22,6 +22,23 @@ def isolated_working_directory(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def non_interactive_unsaved_prompt(monkeypatch):
+    """Answer the unsaved-changes prompt with Discard so closing never blocks on a modal.
+
+    Tests that exercise the prompt override ``_prompt_unsaved_changes`` per instance.
+    """
+    from PySide6.QtWidgets import QMessageBox
+
+    from stepwise.ui.main_window import MainWindow
+
+    monkeypatch.setattr(
+        MainWindow,
+        "_prompt_unsaved_changes",
+        lambda self: QMessageBox.StandardButton.Discard,
+    )
+
+
+@pytest.fixture(autouse=True)
 def dispose_test_windows():
     """Destroy test-owned widgets while their QApplication is still alive.
 

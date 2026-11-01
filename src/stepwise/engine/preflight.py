@@ -6,9 +6,10 @@ Pure engine service independent of Qt UI widgets.
 
 from __future__ import annotations
 
+import difflib
 import os
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from stepwise.core.models import ActionItem, Macro
@@ -23,6 +24,9 @@ class PreflightIssue:
     level: str  # "ERROR" or "WARNING"
     message: str
     details: str = ""
+    # Optional stable id + format params so the UI can localize message/details.
+    code: str = ""
+    params: dict[str, Any] = field(default_factory=dict)
 
     @property
     def is_error(self) -> bool:
@@ -68,6 +72,57 @@ def collect_referenced_variables(macro: Macro) -> list[str]:
     return var_names
 
 
+def find_unknown_text_variables(macro: Macro, columns: Sequence[str]) -> list[PreflightIssue]:
+    """Warn per enabled Type Text step about {Variable}s missing from the data columns."""
+    available = [str(c) for c in columns]
+    issues: list[PreflightIssue] = []
+    step_no = 0
+
+    def _scan(items: list[ActionItem], sec_name: str, enabled: bool) -> None:
+        nonlocal step_no
+        for it in items:
+            if it.type == "group":
+                _scan(it.items, sec_name, enabled and it.enabled)
+                continue
+            step_no += 1
+            if it.type != "type_text" or not (enabled and it.enabled) or not it.text:
+                continue
+            for var in extract_variable_names(it.text):
+                if var in available:
+                    continue
+                close = difflib.get_close_matches(var, available, n=1, cutoff=0.6)
+                folded = [c for c in available if c.strip().casefold() == var.strip().casefold()]
+                hint = folded or close
+                details = (
+                    f'Did you mean "{{{hint[0]}}}"?'
+                    if hint
+                    else f"Available columns: {', '.join(available)}"
+                )
+                issues.append(
+                    PreflightIssue(
+                        level="WARNING",
+                        message=(
+                            f'Step #{step_no} ({sec_name}) types "{{{var}}}", '
+                            f'but the connected data has no column "{var}".'
+                        ),
+                        details=details,
+                        code="UNKNOWN_VARIABLE" if hint else "UNKNOWN_VARIABLE_NO_MATCH",
+                        params={
+                            "step": step_no,
+                            "section": sec_name,
+                            "var": var,
+                            "hint": hint[0] if hint else "",
+                            "available": ", ".join(available),
+                        },
+                    )
+                )
+
+    _scan(macro.setup, "Setup", True)
+    _scan(macro.per_row, "Per Row", True)
+    _scan(macro.cleanup, "Cleanup", True)
+    return issues
+
+
 def run_preflight_checks(
     macro: Macro,
     rows_data: Sequence[Mapping[str, Any]] | None = None,
@@ -75,8 +130,13 @@ def run_preflight_checks(
     package_dir: str | None = None,
     data_file_path: str | None = None,
     results_dir: str = "results",
+    headers: Sequence[str] | None = None,
 ) -> list[PreflightIssue]:
-    """Perform pre-flight checks and return list of errors and warnings."""
+    """Perform pre-flight checks and return list of errors and warnings.
+
+    ``headers`` are the connected data's column names; when omitted they are
+    taken from the first data row.
+    """
     issues: list[PreflightIssue] = []
 
     # 1. Macro Schema Validity (🔴 ERROR)
@@ -84,7 +144,12 @@ def run_preflight_checks(
         validate_macro_dict(macro.to_dict())
     except Exception as e:
         issues.append(
-            PreflightIssue(level="ERROR", message="Macro structure is invalid.", details=str(e))
+            PreflightIssue(
+                level="ERROR",
+                message="Macro structure is invalid.",
+                details=str(e),
+                code="INVALID_MACRO",
+            )
         )
 
     # 2. Check Image Files Existence (🔴 ERROR)
@@ -102,6 +167,8 @@ def run_preflight_checks(
                     level="ERROR",
                     message=f'Referenced image not found: "{os.path.basename(path)}"',
                     details=f"Context: {ctx} (searched: {resolved})",
+                    code="IMAGE_MISSING",
+                    params={"name": os.path.basename(path), "context": ctx, "path": resolved},
                 )
             )
 
@@ -123,6 +190,8 @@ def run_preflight_checks(
                             level="ERROR",
                             message=f'Step "{it.note or it.id}" uses UI Selector mode, but no target element is configured.',
                             details=f"Section: {sec_name}",
+                            code="SELECTOR_MISSING",
+                            params={"step": it.note or it.id, "section": sec_name},
                         )
                     )
             if it.type == "group":
@@ -141,6 +210,8 @@ def run_preflight_checks(
                     level="ERROR",
                     message="Macro requires a data file, but no data is loaded.",
                     details=f"Required columns: {', '.join(ref_vars)}",
+                    code="NO_DATA",
+                    params={"columns": ", ".join(ref_vars)},
                 )
             )
         else:
@@ -152,6 +223,11 @@ def run_preflight_checks(
                         level="ERROR",
                         message=f"Missing required columns in data file: {', '.join(missing_cols)}",
                         details=f"Available columns: {', '.join(sorted(available_cols))}",
+                        code="MISSING_COLUMNS",
+                        params={
+                            "columns": ", ".join(missing_cols),
+                            "available": ", ".join(sorted(available_cols)),
+                        },
                     )
                 )
 
@@ -177,8 +253,19 @@ def run_preflight_checks(
                             level="ERROR",
                             message=f'Column "{col_name}" contains empty values on {len(blank_rows)} row(s).',
                             details=f"Rows: {', '.join(preview_rows)}{suffix}",
+                            code="BLANK_CELLS",
+                            params={
+                                "column": col_name,
+                                "count": len(blank_rows),
+                                "rows": ", ".join(preview_rows) + ("…" if suffix else ""),
+                            },
                         )
                     )
+
+    # 4b. Pinpoint enabled Type Text steps whose {Variable} is not a data column (🟡 WARNING)
+    columns = list(headers) if headers else (list(rows_data[0].keys()) if rows_data else [])
+    if columns:
+        issues.extend(find_unknown_text_variables(macro, columns))
 
     # 5. Screen Resolution & DPI Check (🟡 WARNING)
     screen_info = get_screen_info()
@@ -195,6 +282,14 @@ def run_preflight_checks(
                         f"current screen is {screen_info['width']}x{screen_info['height']} @ {screen_info['scale_percent']}%."
                     ),
                     details="Click coordinates or image matches may fail due to display differences.",
+                    code="SCREEN_MISMATCH",
+                    params={
+                        "recorded": f"{rec.width}x{rec.height} @ {rec.scale_percent}%",
+                        "current": (
+                            f"{screen_info['width']}x{screen_info['height']} "
+                            f"@ {screen_info['scale_percent']}%"
+                        ),
+                    },
                 )
             )
 
@@ -205,6 +300,8 @@ def run_preflight_checks(
                 level="WARNING",
                 message=f"Multiple monitors detected ({screen_info['monitor_count']}).",
                 details="Stepwise operates on the primary display. Ensure the target app is on the primary monitor.",
+                code="MULTI_MONITOR",
+                params={"count": screen_info["monitor_count"]},
             )
         )
 
@@ -226,6 +323,7 @@ def run_preflight_checks(
                 level="WARNING",
                 message="No Verify images found in the Per Row section.",
                 details="We strongly recommend adding a Verify image to critical steps (e.g. Save button) to avoid silent failures.",
+                code="NO_VERIFY",
             )
         )
 
@@ -248,7 +346,47 @@ def run_preflight_checks(
                     level="WARNING",
                     message=f"Previous run has {len(unresolved)} unresolved Failed or Interrupted row(s).",
                     details=f"Rows: {', '.join(str(x) for x in unresolved[:10])}",
+                    code="PREVIOUS_FAILURES",
+                    params={
+                        "count": len(unresolved),
+                        "rows": ", ".join(str(x) for x in unresolved[:10]),
+                    },
                 )
             )
 
     return issues
+
+
+@dataclass(frozen=True)
+class RowRangePreview:
+    first_row_number: int
+    last_row_number: int
+    count: int
+    sample: str
+
+
+def preview_row_range(
+    rows_data: Sequence[Mapping[str, Any]] | None,
+    row_numbers: Sequence[int] | None,
+    start: int,
+    end: int,
+) -> RowRangePreview | None:
+    """Describe a 1-based inclusive data range in source-file row numbers.
+
+    ``start``/``end`` are the same 1-based ordinals passed to ``run_macro`` as
+    ``start_row_index + 1`` and ``end_row_index``. Returns None without data.
+    """
+    if not rows_data:
+        return None
+    total = len(rows_data)
+    start = max(1, min(start, total))
+    end = max(start, min(end, total))
+    nums = list(row_numbers) if row_numbers and len(row_numbers) == total else None
+    first_row = rows_data[start - 1]
+    sample = str(next(iter(first_row.values()), "") or "")
+    return RowRangePreview(
+        first_row_number=nums[start - 1] if nums else start,
+        last_row_number=nums[end - 1] if nums else end,
+        count=end - start + 1,
+        sample=sample,
+    )

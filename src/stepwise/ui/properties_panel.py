@@ -11,6 +11,7 @@ Provides dynamic, type-specific property editors with:
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
@@ -33,8 +34,29 @@ from PySide6.QtWidgets import (
 
 from stepwise.core.models import ActionItem, ImageCondition
 from stepwise.core.variables import substitute_variables
-from stepwise.ui.strings import Strings
+from stepwise.services.input_win import parse_key_combination
+from stepwise.ui.strings import Strings, action_type_label, get_current_language
 from stepwise.ui.theme import get_theme_tokens
+
+# (label, value) one-click presets; labels are key names, identical in every language.
+KEY_PRESETS: tuple[tuple[str, str], ...] = (
+    ("Enter", "enter"),
+    ("Tab", "tab"),
+    ("Esc", "esc"),
+    ("Ctrl+S", "ctrl+s"),
+    ("Ctrl+V", "ctrl+v"),
+    ("Ctrl+A", "ctrl+a"),
+)
+WAIT_PRESETS: tuple[float, ...] = (0.5, 1.0, 2.0, 3.0)
+CHIPS_PER_ROW = 3  # keeps the 320px minimum panel width
+
+
+def is_valid_key_combination(keys: str) -> bool:
+    """True when every token of a key combination is a known key name."""
+    try:
+        return bool(parse_key_combination(keys))
+    except ValueError:
+        return False
 
 
 class PropertiesPanel(QWidget):
@@ -62,6 +84,8 @@ class PropertiesPanel(QWidget):
         self.chips_widget: QWidget | None = None
         self.chip_buttons: list[QPushButton] = []
         self.btn_locate: QPushButton | None = None
+        # Optional hook run before a modal opens (e.g. to cancel pending input).
+        self.before_prompt: Callable[[], None] | None = None
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(8, 8, 8, 8)
@@ -166,11 +190,18 @@ class PropertiesPanel(QWidget):
         )
         self.spin_wait_before.valueChanged.connect(self._on_wait_before_changed)
         common_layout.addRow(Strings.WAIT_BEFORE, self.spin_wait_before)
+        self.wait_before_chips = self._create_wait_chips(self.spin_wait_before)
+        common_layout.addRow(self.wait_before_chips)
 
         self.container_layout.addWidget(common_box)
 
         # 2. Type-Specific Settings
-        act_box = QGroupBox(f"{action.type.capitalize()} Parameters")
+        type_name = (
+            action_type_label(action.type)
+            if get_current_language() == "ko"
+            else action.type.capitalize()
+        )
+        act_box = QGroupBox(Strings.PARAMETERS_TITLE.format(type=type_name))
         act_layout = QFormLayout(act_box)
 
         if action.type == "click":
@@ -298,13 +329,8 @@ class PropertiesPanel(QWidget):
             btn_locate.clicked.connect(lambda: self.request_locate_target.emit(action))
             self.btn_locate = btn_locate
 
-            btn_test_click = QPushButton("⚡ " + Strings.TEST_THIS_STEP)
-            btn_test_click.setToolTip(Strings.Tooltips.TEST_THIS_STEP)
-            btn_test_click.clicked.connect(lambda: self.request_test_step.emit(action))
-
             h_helpers.addWidget(btn_show)
             h_helpers.addWidget(btn_locate)
-            h_helpers.addWidget(btn_test_click)
             act_layout.addRow(Strings.ACTION_TOOLS_LABEL, h_helpers)
 
             self.cmb_button = QComboBox()
@@ -364,11 +390,6 @@ class PropertiesPanel(QWidget):
 
             self.txt_text.textChanged.connect(_on_txt_changed)
 
-            btn_test_type = QPushButton("⚡ " + Strings.TEST_THIS_STEP)
-            btn_test_type.setToolTip(Strings.Tooltips.TEST_THIS_STEP)
-            btn_test_type.clicked.connect(lambda: self.request_test_step.emit(action))
-            act_layout.addRow(Strings.ACTION_TOOLS_LABEL, btn_test_type)
-
             self.cmb_mode = QComboBox()
             self.cmb_mode.addItem(Strings.MODE_PASTE, "paste")
             self.cmb_mode.addItem(Strings.MODE_KEYSTROKES, "keystrokes")
@@ -394,15 +415,33 @@ class PropertiesPanel(QWidget):
         elif action.type == "key":
             self.txt_keys = QLineEdit(action.keys)
             self.txt_keys.setPlaceholderText("e.g. enter, tab, ctrl+s, esc")
-            self.txt_keys.textChanged.connect(
-                lambda v: setattr(action, "keys", v) or self.property_changed.emit()
-            )
             act_layout.addRow(Strings.KEYS_TO_PRESS, self.txt_keys)
 
-            btn_test_key = QPushButton("⚡ " + Strings.TEST_THIS_STEP)
-            btn_test_key.setToolTip(Strings.Tooltips.TEST_THIS_STEP)
-            btn_test_key.clicked.connect(lambda: self.request_test_step.emit(action))
-            act_layout.addRow(Strings.ACTION_TOOLS_LABEL, btn_test_key)
+            t = get_theme_tokens()
+            self.lbl_key_warning = QLabel(Strings.KEY_UNKNOWN_WARNING)
+            self.lbl_key_warning.setWordWrap(True)
+            self.lbl_key_warning.setStyleSheet(
+                f"font-size: 11px; color: {t['status_fail']}; font-weight: 500;"
+            )
+            act_layout.addRow("", self.lbl_key_warning)
+
+            self.key_chips = QWidget()
+            key_grid = QGridLayout(self.key_chips)
+            key_grid.setContentsMargins(0, 0, 0, 0)
+            key_grid.setSpacing(4)
+            for idx, (label, value) in enumerate(KEY_PRESETS):
+                chip = self._make_chip(f"[{label}]")
+                chip.clicked.connect(lambda _checked=False, v=value: self.txt_keys.setText(v))
+                key_grid.addWidget(chip, idx // CHIPS_PER_ROW, idx % CHIPS_PER_ROW)
+            act_layout.addRow(self.key_chips)
+
+            def _on_keys_changed(v: str) -> None:
+                action.keys = v
+                self._update_key_warning(v)
+                self.property_changed.emit()
+
+            self.txt_keys.textChanged.connect(_on_keys_changed)
+            self._update_key_warning(action.keys)
 
             self.spin_repeat = QSpinBox()
             self.spin_repeat.setRange(1, 100)
@@ -420,6 +459,8 @@ class PropertiesPanel(QWidget):
                 lambda v: setattr(action, "seconds", v) or self.property_changed.emit()
             )
             act_layout.addRow(Strings.WAIT_SECONDS, self.spin_wait)
+            self.wait_chips = self._create_wait_chips(self.spin_wait)
+            act_layout.addRow(self.wait_chips)
 
         elif action.type in ("click_image", "wait_image", "wait_image_gone"):
             h_img = QHBoxLayout()
@@ -470,6 +511,8 @@ class PropertiesPanel(QWidget):
 
                 from stepwise.services.window_win import list_visible_windows
 
+                if self.before_prompt is not None:
+                    self.before_prompt()
                 wins = list_visible_windows(exclude_self=True)
                 titles = [t for _, t in wins if t.strip()]
                 if not titles:
@@ -543,7 +586,18 @@ class PropertiesPanel(QWidget):
 
         # 3. Guard & Verify Visual Safety Checks (for non-image, non-group actions)
         if action.type not in ("click_image", "wait_image", "wait_image_gone", "group"):
-            safety_box = QGroupBox("🛡️ Guard & Verify (Visual Safety)")
+            # Advanced: folded unless this step already uses Guard/Verify. Folding only
+            # hides the editors; action.guard / action.verify are left untouched.
+            expanded = action.guard is not None or action.verify is not None
+            self.btn_safety_toggle = QPushButton()
+            self.btn_safety_toggle.setCheckable(True)
+            self.btn_safety_toggle.setChecked(expanded)
+            self.btn_safety_toggle.setStyleSheet("text-align: left; padding: 4px 8px;")
+            self.btn_safety_toggle.setToolTip(Strings.ADVANCED_SAFETY_TOGGLE_TIP)
+            self.container_layout.addWidget(self.btn_safety_toggle)
+
+            safety_box = QGroupBox(Strings.SAFETY_BOX_TITLE)
+            self.safety_box = safety_box
             safety_layout = QFormLayout(safety_box)
 
             self.txt_guard_image = QLineEdit(action.guard.image if action.guard else "")
@@ -580,6 +634,14 @@ class PropertiesPanel(QWidget):
 
             self.container_layout.addWidget(safety_box)
 
+            def _set_safety_expanded(checked: bool) -> None:
+                arrow = "▾" if checked else "▸"
+                self.btn_safety_toggle.setText(f"{arrow} {Strings.ADVANCED_SAFETY_TOGGLE}")
+                safety_box.setVisible(checked)
+
+            self.btn_safety_toggle.toggled.connect(_set_safety_expanded)
+            _set_safety_expanded(expanded)
+
         # 4. Action Buttons (Test this step)
         btn_layout = QHBoxLayout()
         btn_test = QPushButton(Strings.TEST_THIS_STEP)
@@ -589,6 +651,36 @@ class PropertiesPanel(QWidget):
         self.container_layout.addLayout(btn_layout)
 
         self.container_layout.addStretch()
+
+    def _make_chip(self, text: str) -> QPushButton:
+        t = get_theme_tokens()
+        chip = QPushButton(text)
+        chip.setCursor(Qt.CursorShape.PointingHandCursor)
+        chip.setMinimumWidth(0)
+        chip.setStyleSheet(
+            f"QPushButton {{ background-color: {t['chip_bg']}; color: {t['chip_fg']}; "
+            f"border: 1px solid {t['chip_border']}; border-radius: 10px; padding: 1px 3px; font-size: 11px; }} "
+            f"QPushButton:hover {{ background-color: {t['bg_hover']}; }}"
+        )
+        return chip
+
+    def _create_wait_chips(self, spin: QDoubleSpinBox) -> QWidget:
+        """One-click [0.5s] [1s] [2s] [3s] presets that set the given spin box."""
+        widget = QWidget()
+        grid = QGridLayout(widget)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setSpacing(4)
+        for idx, seconds in enumerate(WAIT_PRESETS):
+            label = Strings.WAIT_CHIP.format(seconds=f"{seconds:g}")
+            chip = self._make_chip(f"[{label}]")
+            chip.clicked.connect(lambda _checked=False, v=seconds: spin.setValue(v))
+            grid.addWidget(chip, 0, idx)
+        return widget
+
+    def _update_key_warning(self, keys: str) -> None:
+        label = getattr(self, "lbl_key_warning", None)
+        if label is not None:
+            label.setVisible(bool(keys.strip()) and not is_valid_key_combination(keys))
 
     def _on_enabled_toggled(self, checked: bool) -> None:
         if self._current_action:
@@ -657,9 +749,12 @@ class PropertiesPanel(QWidget):
 
     def _insert_column_token(self, column_name: str) -> None:
         """Insert {column_name} at current cursor position in txt_text."""
-        if hasattr(self, "txt_text") and self.txt_text is not None:
-            self.txt_text.insert(f"{{{column_name}}}")
-            self.txt_text.setFocus()
+        editor = getattr(self, "txt_text", None)
+        if editor is not None:
+            editor.insert(f"{{{column_name}}}")
+            # The textChanged handler may rebuild the editor; only focus a live one.
+            if self.txt_text is editor:
+                editor.setFocus()
 
     def _update_text_preview(self, action: ActionItem) -> None:
         """Update live sample preview and Korean IME recommendations."""

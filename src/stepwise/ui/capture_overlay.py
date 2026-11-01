@@ -19,6 +19,7 @@ from PySide6.QtWidgets import QApplication, QWidget
 
 from stepwise.services.screen import capture_screen
 from stepwise.services.uia_win import UIElementInfo, inspect_element_at
+from stepwise.ui.strings import Strings
 
 
 class CaptureOverlay(QWidget):
@@ -137,6 +138,35 @@ class CaptureOverlay(QWidget):
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
                 badge_text,
             )
+
+        self._paint_banner(painter)
+
+    def banner_text(self) -> str:
+        return {
+            "pick": Strings.CAPTURE_BANNER_PICK,
+            "region": Strings.CAPTURE_BANNER_REGION,
+            "element": Strings.CAPTURE_BANNER_ELEMENT,
+        }.get(self.mode, "")
+
+    def _paint_banner(self, painter: QPainter) -> None:
+        """Top-center instructions. Painted on the widget only: saved captures are
+        cut from the frozen frame (self._frame), so the banner never appears in them."""
+        text = self.banner_text()
+        if not text:
+            return
+        painter.setFont(QFont("Malgun Gothic", 12, QFont.Weight.Bold))
+        metrics = painter.fontMetrics()
+        banner_w = min(self.width() - 20, metrics.horizontalAdvance(text) + 40)
+        banner_h = metrics.height() + 18
+        banner_x = (self.width() - banner_w) // 2
+        banner_y = 24
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(15, 23, 42, 210))
+        painter.drawRoundedRect(banner_x, banner_y, banner_w, banner_h, 12, 12)
+        painter.setPen(QColor("#f8fafc"))
+        painter.drawText(
+            banner_x, banner_y, banner_w, banner_h, Qt.AlignmentFlag.AlignCenter, text
+        )
 
     def mousePressEvent(self, event: Any) -> None:
         if event.button() == Qt.LeftButton:

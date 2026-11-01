@@ -66,7 +66,7 @@ class Strings:
     SECTION_CLEANUP = "③ CLEANUP (runs once at end, optional)"
     SECTION_EMPTY_PLACEHOLDER = "(Empty — select to add action here)"
     SECTION_SETUP_EMPTY = "(Empty — window alignment, login, etc. Optional)"
-    SECTION_PER_ROW_EMPTY = "(Empty — click, type {Column}, save for each data row)"
+    SECTION_PER_ROW_EMPTY = "(Empty — click, type a [Column] value, save for each data row)"
     SECTION_CLEANUP_EMPTY = "(Empty — close screen, logout, etc. Optional)"
     INSERT_TARGET_TOP = "Add target: [{section}] at beginning"
     INSERT_TARGET_AFTER = "Add target: [{section}] after Step #{step}"
@@ -131,7 +131,7 @@ class Strings:
         "1. Click <b>[+ Click]</b> or <b>[+ Type]</b> below the Action Tree.<br>"
         "2. Select the added step in the tree to configure coordinates, UI Selector, or text.<br>"
         "3. Use <b>[Pick (F8)]</b> to capture screen coordinates or <b>[🎯 Pick UI Element]</b> for UI Selector.<br>"
-        "4. Switch to <b>Data Preview</b> to load an Excel/CSV file and use <code>{Variables}</code>."
+        "4. Load an Excel/CSV file in <b>Data Preview</b>, then click a <b>[Column]</b> chip to insert its value."
     )
     COORD_X = "X coordinate:"
     COORD_Y = "Y coordinate:"
@@ -324,6 +324,181 @@ class Strings:
     )
     PASSWORD_WARNING = "Never enter passwords or secrets into macro actions."
 
+    # UX Round 2 — Stage 1
+    UNSAVED_CHANGES_TITLE = "Unsaved Changes"
+    UNSAVED_CHANGES_MSG = '"{name}" has unsaved changes. Save before continuing?'
+    MACRO_EXISTS_TITLE = "Macro Already Exists"
+    MACRO_EXISTS_MSG = 'A macro named "{name}" already exists. Choose a different name.'
+    SELECT_TYPE_TEXT_FIRST = "Select a Type Text step first, then click a column to insert it."
+    SHORTCUT_BLOCKED_RUNNING = "Shortcut ignored while a run or step test is in progress."
+    SHORTCUT_PICK_UNSUPPORTED = "F8 (Pick) works on a selected Click step."
+    SHORTCUT_CAPTURE_UNSUPPORTED = "F9 (Capture) works on a selected image step."
+    STEP_TEST_COUNTDOWN = "Testing step in {seconds}s... switch to your target window now."
+    STEP_TEST_BUSY = "A step test is already counting down."
+    DATA_DROP_HINT = "📂 Drag an Excel (.xlsx) or CSV file here, or click [Choose Data File]."
+    DATA_DROP_UNSUPPORTED = "Only a single .xlsx or .csv file can be dropped here."
+    DATA_LOADED_SUMMARY = "{file} · {rows} rows · {cols} columns"
+    DATA_LOAD_ERROR_TITLE = "Data File Not Loaded"
+    DATA_LOAD_PERMISSION_ERROR = (
+        "{file} could not be opened. It may be open in another program such as Excel. "
+        "Close it there and try again."
+    )
+    DATA_LOAD_ERROR = "{file} could not be loaded.\n{error}"
+    DATA_LOAD_FAILED_STATUS = "Could not load {file}."
+    DATA_KEEP_PREVIOUS = "Still connected: {file}"
+    DATA_RECONNECT = "🔗 Reconnect: {file}"
+    PREFLIGHT_END_ROW = "to row:"
+    PREFLIGHT_RANGE_PREVIEW = "→ Source rows {first} ~ {last} ({count} rows, first row e.g. {sample})"
+    STEP_TEST_CANCELLED = "Step test cancelled: the step no longer exists."
+    STEP_TEST_CANCELLED_DIALOG = "Step test cancelled because a dialog or menu was opened."
+    DATA_LOCKED_RUNNING = "The data file cannot be changed while a run is in progress."
+    NEW_MACRO_PROMPT = "Enter macro name:"
+
+    # UX Round 2 — Stage 2: toolbar
+    TEST_1_ROW = "🧪 Test 1 Row"
+    RUN_ROW_COUNT = "{n}"
+    TEST_1_ROW_BLOCKED_TITLE = "Cannot Test Yet"
+    TEST_1_ROW_BLOCKED = "Fix these problems before testing:\n{issues}"
+    RETRY_FAILED_STATUS = "Retrying {count} row(s) from #{row}, starting in {sec}s..."
+
+    # Pre-flight diagnostics, keyed by PreflightIssue.code (mirror engine/preflight.py)
+    ISSUE_INVALID_MACRO = "Macro structure is invalid."
+    ISSUE_IMAGE_MISSING = 'Referenced image not found: "{name}"'
+    ISSUE_IMAGE_MISSING_DETAILS = "Context: {context} (searched: {path})"
+    ISSUE_SELECTOR_MISSING = (
+        'Step "{step}" uses UI Selector mode, but no target element is configured.'
+    )
+    ISSUE_SELECTOR_MISSING_DETAILS = "Section: {section}"
+    ISSUE_NO_DATA = "Macro requires a data file, but no data is loaded."
+    ISSUE_NO_DATA_DETAILS = "Required columns: {columns}"
+    ISSUE_MISSING_COLUMNS = "Missing required columns in data file: {columns}"
+    ISSUE_MISSING_COLUMNS_DETAILS = "Available columns: {available}"
+    ISSUE_BLANK_CELLS = 'Column "{column}" contains empty values on {count} row(s).'
+    ISSUE_BLANK_CELLS_DETAILS = "Rows: {rows}"
+    ISSUE_UNKNOWN_VARIABLE = (
+        'Step #{step} ({section}) types "{{{var}}}", but the connected data has no column "{var}".'
+    )
+    ISSUE_UNKNOWN_VARIABLE_DETAILS = 'Did you mean "{{{hint}}}"?'
+    ISSUE_UNKNOWN_VARIABLE_NO_MATCH = ISSUE_UNKNOWN_VARIABLE
+    ISSUE_UNKNOWN_VARIABLE_NO_MATCH_DETAILS = "Available columns: {available}"
+    ISSUE_SCREEN_MISMATCH = "Screen mismatch: Recorded at {recorded}, current screen is {current}."
+    ISSUE_SCREEN_MISMATCH_DETAILS = (
+        "Click coordinates or image matches may fail due to display differences."
+    )
+    ISSUE_MULTI_MONITOR = "Multiple monitors detected ({count})."
+    ISSUE_MULTI_MONITOR_DETAILS = (
+        "Stepwise operates on the primary display. Ensure the target app is on the primary monitor."
+    )
+    ISSUE_NO_VERIFY = "No Verify images found in the Per Row section."
+    ISSUE_NO_VERIFY_DETAILS = (
+        "We strongly recommend adding a Verify image to critical steps "
+        "(e.g. Save button) to avoid silent failures."
+    )
+    ISSUE_PREVIOUS_FAILURES = "Previous run has {count} unresolved Failed or Interrupted row(s)."
+    ISSUE_PREVIOUS_FAILURES_DETAILS = "Rows: {rows}"
+    ISSUE_SECTION_SETUP = "Setup"
+    ISSUE_SECTION_PER_ROW = "Per Row"
+    ISSUE_SECTION_CLEANUP = "Cleanup"
+
+    # Floating run panel
+    RUN_PANEL_RUNNING = "Stepwise ▶ Running"
+    RUN_PANEL_PAUSED = "Stepwise ⏸ Paused"
+    RUN_PANEL_SPEED = "Speed: {speed}"
+    RUN_PANEL_ROW = "Row {row} / {total}"
+    RUN_PANEL_STATS = "OK: {ok}  |  Failed: {failed}"
+    RUN_PANEL_INIT = "Initializing..."
+    RUN_PANEL_STARTING = "Starting run..."
+    RUN_PANEL_EXECUTING_ROW = "Executing row {row}"
+    RUN_PANEL_NEXT = "Next ⏭"
+    RUN_PANEL_F12 = "⛔ Press F12 to stop"
+    SPEED_NORMAL = "Normal"
+    SPEED_SLOW = "Slow"
+    SPEED_VERY_SLOW = "Very slow"
+
+    # Pre-flight dialog
+    PREFLIGHT_TITLE = 'Ready to run "{name}"'
+    PREFLIGHT_INFO = (
+        "<b>Macro:</b> {name} &nbsp;|&nbsp; <b>Data:</b> {data} ({rows} rows)"
+    )
+    PREFLIGHT_NO_DATA = "No Data"
+    PREFLIGHT_DIAGNOSTICS = "Pre-flight Diagnostics"
+    PREFLIGHT_OPTIONS = "Execution Options"
+    PREFLIGHT_START_ROW = "Start from row:"
+    PREFLIGHT_SPEED = "Speed Delay:"
+    PREFLIGHT_SPEED_NORMAL = "Normal"
+    PREFLIGHT_SPEED_SLOW = "Slow (+0.5s)"
+    PREFLIGHT_SPEED_VERY_SLOW = "Very slow (+1s)"
+    PREFLIGHT_SKIP_SETUP = "Skip Setup"
+    PREFLIGHT_SKIP_CLEANUP = "Skip Cleanup"
+    PREFLIGHT_WORKFLOW = "Workflow:"
+    PREFLIGHT_CLICK_START = "Click [Start Run] to begin execution."
+    PREFLIGHT_BLOCKED = "⚠ Please resolve blocking errors above before running."
+    PREFLIGHT_RUN_1_ROW = "Run 1 Row (Test)"
+    PREFLIGHT_START = "Start Run"
+    PREFLIGHT_COUNTDOWN = "Starting in {seconds}... (switch to your target window now)"
+    PREFLIGHT_ALL_PASSED = "✅ All pre-flight checks passed."
+    PREFLIGHT_ERROR_PREFIX = "🔴 Error: "
+    PREFLIGHT_WARNING_PREFIX = "🟡 Warning: "
+    CANCEL = "Cancel"
+
+    # Properties panel input helpers
+    KEY_UNKNOWN_WARNING = "⚠ Unknown key name. Try one of the buttons below."
+    WAIT_CHIP = "{seconds}s"
+    ADVANCED_SAFETY_TOGGLE = "Advanced checks"
+    ADVANCED_SAFETY_TOGGLE_TIP = "Optional screen checks before (Guard) and after (Verify) this step."
+    SAFETY_BOX_TITLE = "🛡️ Guard & Verify (Visual Safety)"
+    PARAMETERS_TITLE = "{type} Parameters"
+
+    # Capture overlay banners
+    CAPTURE_BANNER_PICK = "Click the target position once · Esc to cancel"
+    CAPTURE_BANNER_REGION = "Drag around the area to capture · Esc to cancel"
+    CAPTURE_BANNER_ELEMENT = "Check the blue outline, then click · Esc to cancel"
+
+    # Action tree: step summaries (English wording is the long-standing format)
+    TYPE_WINDOW_SET_BOUNDS = "Window bounds"
+    SUMMARY_CLICK_XY = "{sim}{double}Click ({x}, {y}){button}"
+    SUMMARY_CLICK_SELECTOR = '{sim}🎯 {double}Click [{control}] "{ident}"{button}'
+    SUMMARY_SIM_BADGE = "⚡Sim "
+    SUMMARY_DOUBLE = "Double "
+    SUMMARY_BUTTON = " ({button})"
+    SUMMARY_ELEMENT = "Element"
+    SUMMARY_TARGET = "Target"
+    SUMMARY_CLICK_IMAGE = 'Click image "{image}"'
+    SUMMARY_TYPE = 'Type "{text}"{mode}'
+    SUMMARY_TYPE_KEYSTROKES = " [keys]"
+    SUMMARY_KEY = 'Key "{keys}"{repeat}'
+    SUMMARY_KEY_REPEAT = " x{count}"
+    SUMMARY_WAIT = "Wait {seconds}s"
+    SUMMARY_WAIT_IMAGE = 'Wait for "{image}" (max {timeout}s)'
+    SUMMARY_WAIT_IMAGE_GONE = 'Wait disappear "{image}"'
+    SUMMARY_WINDOW_MAXIMIZE = 'Window "{title}" -> Maximize'
+    SUMMARY_WINDOW_BOUNDS = 'Window "{title}" -> ({x}, {y}) {width}x{height}'
+    SUMMARY_NO_WINDOW = "(No Window Specified)"
+    SUMMARY_GROUP = "Group: {name} ({count} steps)"
+    MOUSE_LEFT = "left"
+    MOUSE_RIGHT = "right"
+    MOUSE_MIDDLE = "middle"
+    STEP_WARN_EMPTY_TEXT = "⚠ Enter the text to type"
+    STEP_WARN_EMPTY_KEYS = "⚠ Choose the key to press"
+    STEP_WARN_EMPTY_IMAGE = "⚠ Capture the image to find"
+
+    # Action tree: context menu & insertion banner
+    CTX_ADD_TO = "+ Add Action to {target}"
+    CTX_ADD_CLICK = "👆 Add Click"
+    CTX_ADD_TYPE = "⌨ Add Type text"
+    CTX_ADD_KEY = "↵ Add Key press"
+    CTX_ADD_WAIT = "⏱ Add Wait"
+    CTX_ADD_IMAGE = "🖼 Add Click image"
+    CTX_ADD_WINDOW = "🪟 Add Window Bounds"
+    CTX_MOVE_TO_SECTION = "Move to Section"
+    CTX_MOVE_TO_SETUP = "Move to SETUP"
+    CTX_MOVE_TO_PER_ROW = "Move to PER ROW"
+    CTX_MOVE_TO_CLEANUP = "Move to CLEANUP"
+    TARGET_SECTION_SETUP = "SETUP"
+    TARGET_SECTION_PER_ROW = "PER ROW"
+    TARGET_SECTION_CLEANUP = "CLEANUP"
+    NO_MACRO_LOADED = "🎯 No macro loaded"
+
     class Tooltips:
         """Centralized rich HTML tooltips (SuperTips) for key UI interactions."""
 
@@ -382,6 +557,11 @@ class Strings:
             "Runs the workflow one action at a time with manual approval for each step.",
             tip="Perfect for debugging and verifying new macros safely.",
         )
+        TEST_1_ROW = card(
+            "Test 1 Row",
+            "Runs the whole macro for just one data row (the selected row, or the first).",
+            tip="Starts after a short countdown so you can switch to the target window.",
+        )
         SAVE_MACRO = card(
             "Save Macro Package",
             "Saves the current macro steps and embedded image assets into a .swm file.",
@@ -401,7 +581,7 @@ class Strings:
         SECTION_PER_ROW = card(
             "PER ROW Section (Repeats for Every Row)",
             "The core processing loop. These steps run sequentially for each record in your data file.",
-            tip="Insert {Column} variables here to automatically type spreadsheet values.",
+            tip="Insert [Column] variables here to automatically type spreadsheet values.",
         )
         SECTION_CLEANUP = card(
             "CLEANUP Section (Runs Once at End)",
@@ -418,7 +598,7 @@ class Strings:
         ADD_TYPE = card(
             "Add Text Input",
             "Appends a text typing action to the active section.",
-            tip="Supports plain text as well as dynamic {Column} variables.",
+            tip="Supports plain text as well as dynamic [Column] variables.",
         )
         ADD_KEY = card(
             "Add Key Press",
@@ -554,7 +734,7 @@ _KO_STRINGS: dict[str, str] = {
     "SECTION_CLEANUP": "③ 끝날 때 1번 (창 닫기, 없어도 됨)",
     "SECTION_EMPTY_PLACEHOLDER": "(비어 있음 — 여기를 선택한 뒤 동작을 추가하세요)",
     "SECTION_SETUP_EMPTY": "(비어 있음 — 창 위치 맞추기, 로그인 등. 비워두셔도 됩니다)",
-    "SECTION_PER_ROW_EMPTY": "(비어 있음 — 입력 칸 클릭 ➜ {열이름} 타이핑 ➜ 저장 등 반복 동작 추가)",
+    "SECTION_PER_ROW_EMPTY": "(비어 있음 — 입력 칸 클릭 ➜ [열 이름] 값 입력 ➜ 저장 등 반복 동작 추가)",
     "SECTION_CLEANUP_EMPTY": "(비어 있음 — 완료 후 창 닫기, 로그아웃 등. 비워두셔도 됩니다)",
     "INSERT_TARGET_TOP": "추가 위치: [{section}] 맨 앞",
     "INSERT_TARGET_AFTER": "추가 위치: [{section}] Step #{step} 다음",
@@ -605,7 +785,7 @@ _KO_STRINGS: dict[str, str] = {
         "1. 동작 트리 아래의 <b>[+ 클릭]</b> 또는 <b>[+ 텍스트]</b> 버튼을 눌러 스텝을 추가하세요.<br>"
         "2. 추가된 스텝을 선택해 좌표, <b>UI 요소 Selector</b>, 또는 입력할 텍스트를 설정하세요.<br>"
         "3. <b>[좌표 지정 (F8)]</b> 또는 <b>[🎯 UI 요소 선택]</b>으로 대상을 마우스로 바로 지정할 수 있습니다.<br>"
-        "4. 하단 <b>데이터 미리보기</b>에서 엑셀/CSV 파일을 불러오면 <code>{변수명}</code>을 자동 입력할 수 있습니다."
+        "4. 하단 <b>데이터 미리보기</b>에서 엑셀/CSV 파일을 불러온 뒤 <b>[열 이름]</b> 버튼을 누르면 값을 자동 입력할 수 있습니다."
     ),
     "COORD_X": "X 좌표:",
     "COORD_Y": "Y 좌표:",
@@ -771,6 +951,151 @@ _KO_STRINGS: dict[str, str] = {
     "RECOVERY_FOUND_TITLE": "자동 복구 가능",
     "RECOVERY_FOUND_MSG": "이전 세션에서 저장되지 않은 매크로를 발견했습니다. 복구하시겠습니까?",
     "PASSWORD_WARNING": "보안을 위해 비밀번호나 민감한 인증정보는 매크로에 직접 입력하지 마세요.",
+    "UNSAVED_CHANGES_TITLE": "저장하지 않은 변경 사항",
+    "UNSAVED_CHANGES_MSG": '"{name}"에 저장하지 않은 변경 사항이 있습니다. 계속하기 전에 저장할까요?',
+    "MACRO_EXISTS_TITLE": "같은 이름의 매크로가 있습니다",
+    "MACRO_EXISTS_MSG": '"{name}" 매크로가 이미 있습니다. 다른 이름을 입력하세요.',
+    "SELECT_TYPE_TEXT_FIRST": "먼저 '텍스트 입력' 단계를 선택한 뒤 열 이름을 누르세요.",
+    "SHORTCUT_BLOCKED_RUNNING": "실행 또는 단계 테스트 중에는 단축키가 동작하지 않습니다.",
+    "SHORTCUT_PICK_UNSUPPORTED": "F8(좌표 지정)은 '클릭' 단계를 선택했을 때 사용할 수 있습니다.",
+    "SHORTCUT_CAPTURE_UNSUPPORTED": "F9(화면 캡처)는 이미지 단계를 선택했을 때 사용할 수 있습니다.",
+    "STEP_TEST_COUNTDOWN": "{seconds}초 후 단계를 테스트합니다... 지금 대상 창으로 전환하세요.",
+    "STEP_TEST_BUSY": "단계 테스트 카운트다운이 이미 진행 중입니다.",
+    "DATA_DROP_HINT": "📂 엑셀(.xlsx) 또는 CSV 파일을 여기로 끌어다 놓거나 [파일 선택]을 누르세요",
+    "DATA_DROP_UNSUPPORTED": ".xlsx 또는 .csv 파일 하나만 끌어다 놓을 수 있습니다.",
+    "DATA_LOADED_SUMMARY": "{file} · 데이터 {rows}건 · {cols}개 열",
+    "DATA_LOAD_ERROR_TITLE": "데이터 파일을 불러오지 못했습니다",
+    "DATA_LOAD_PERMISSION_ERROR": "{file} 파일을 열 수 없습니다. 엑셀 등 다른 프로그램에서 열려 있는지 확인하고, 닫은 뒤 다시 시도하세요.",
+    "DATA_LOAD_ERROR": "{file} 파일을 불러오지 못했습니다.\n{error}",
+    "DATA_LOAD_FAILED_STATUS": "{file} 불러오기 실패.",
+    "DATA_KEEP_PREVIOUS": "기존 연결 유지: {file}",
+    "DATA_RECONNECT": "🔗 다시 연결: {file}",
+    "PREFLIGHT_END_ROW": "끝 순번:",
+    "PREFLIGHT_RANGE_PREVIEW": "→ 원본 엑셀 {first}행 ~ {last}행 ({count}건, 첫 줄 예시: {sample})",
+    "STEP_TEST_CANCELLED": "테스트할 단계가 삭제되어 단계 테스트를 취소했습니다.",
+    "STEP_TEST_CANCELLED_DIALOG": "대화상자나 메뉴가 열려 단계 테스트를 취소했습니다.",
+    "DATA_LOCKED_RUNNING": "실행 중에는 데이터 파일을 바꿀 수 없습니다.",
+    "NEW_MACRO_PROMPT": "새 매크로 이름을 입력하세요:",
+    "TEST_1_ROW": "🧪 1줄 테스트",
+    "RUN_ROW_COUNT": "{n}줄",
+    "TEST_1_ROW_BLOCKED_TITLE": "아직 테스트할 수 없습니다",
+    "TEST_1_ROW_BLOCKED": "테스트 전에 아래 문제를 먼저 해결해 주세요:\n{issues}",
+    "RETRY_FAILED_STATUS": "#{row}행부터 {count}줄을 다시 실행합니다. {sec}초 후 시작...",
+    "ISSUE_INVALID_MACRO": "매크로 구조가 올바르지 않습니다.",
+    "ISSUE_IMAGE_MISSING": '참조한 이미지 파일을 찾을 수 없습니다: "{name}"',
+    "ISSUE_IMAGE_MISSING_DETAILS": "위치: {context} (찾은 경로: {path})",
+    "ISSUE_SELECTOR_MISSING": '단계 "{step}"은(는) UI 요소 선택 방식인데 대상 요소가 지정되지 않았습니다.',
+    "ISSUE_SELECTOR_MISSING_DETAILS": "구간: {section}",
+    "ISSUE_NO_DATA": "이 매크로는 데이터 파일이 필요하지만 아직 연결되지 않았습니다.",
+    "ISSUE_NO_DATA_DETAILS": "필요한 열: {columns}",
+    "ISSUE_MISSING_COLUMNS": "데이터 파일에 필요한 열이 없습니다: {columns}",
+    "ISSUE_MISSING_COLUMNS_DETAILS": "현재 열: {available}",
+    "ISSUE_BLANK_CELLS": '"{column}" 열에 빈 칸이 {count}줄 있습니다.',
+    "ISSUE_BLANK_CELLS_DETAILS": "행: {rows}",
+    "ISSUE_UNKNOWN_VARIABLE": (
+        '{step}번 단계({section})에서 "{{{var}}}"를 입력하지만, 연결된 데이터에 "{var}" 열이 없습니다.'
+    ),
+    "ISSUE_UNKNOWN_VARIABLE_DETAILS": '"{{{hint}}}"을(를) 쓰려던 것인가요?',
+    "ISSUE_UNKNOWN_VARIABLE_NO_MATCH": (
+        '{step}번 단계({section})에서 "{{{var}}}"를 입력하지만, 연결된 데이터에 "{var}" 열이 없습니다.'
+    ),
+    "ISSUE_UNKNOWN_VARIABLE_NO_MATCH_DETAILS": "현재 열: {available}",
+    "ISSUE_SCREEN_MISMATCH": "화면이 녹화 당시와 다릅니다: 녹화 {recorded}, 현재 {current}.",
+    "ISSUE_SCREEN_MISMATCH_DETAILS": "화면 차이로 좌표 클릭이나 이미지 찾기가 실패할 수 있습니다.",
+    "ISSUE_MULTI_MONITOR": "모니터가 {count}대 연결되어 있습니다.",
+    "ISSUE_MULTI_MONITOR_DETAILS": "Stepwise는 주 모니터에서 동작합니다. 대상 프로그램을 주 모니터에 두세요.",
+    "ISSUE_NO_VERIFY": "② 반복 구간에 Verify(결과 확인) 이미지가 없습니다.",
+    "ISSUE_NO_VERIFY_DETAILS": "저장 버튼 등 중요한 단계에 Verify 이미지를 추가하면 조용한 실패를 막을 수 있습니다.",
+    "ISSUE_PREVIOUS_FAILURES": "이전 실행에서 실패/중단된 줄이 {count}개 남아 있습니다.",
+    "ISSUE_PREVIOUS_FAILURES_DETAILS": "행: {rows}",
+    "ISSUE_SECTION_SETUP": "① 시작",
+    "ISSUE_SECTION_PER_ROW": "② 반복",
+    "ISSUE_SECTION_CLEANUP": "③ 마무리",
+    "RUN_PANEL_RUNNING": "Stepwise ▶ 실행 중",
+    "RUN_PANEL_PAUSED": "Stepwise ⏸ 일시정지됨",
+    "RUN_PANEL_SPEED": "속도: {speed}",
+    "RUN_PANEL_ROW": "{total}줄 중 {row}번째",
+    "RUN_PANEL_STATS": "성공: {ok}  |  실패: {failed}",
+    "RUN_PANEL_INIT": "준비 중...",
+    "RUN_PANEL_STARTING": "실행을 시작합니다...",
+    "RUN_PANEL_EXECUTING_ROW": "엑셀 {row}행 처리 중",
+    "RUN_PANEL_NEXT": "다음 ⏭",
+    "RUN_PANEL_F12": "⛔ 멈추려면 F12",
+    "SPEED_NORMAL": "보통",
+    "SPEED_SLOW": "느리게",
+    "SPEED_VERY_SLOW": "매우 느리게",
+    "PREFLIGHT_TITLE": '"{name}" 실행 준비',
+    "PREFLIGHT_INFO": "<b>매크로:</b> {name} &nbsp;|&nbsp; <b>데이터:</b> {data} ({rows}줄)",
+    "PREFLIGHT_NO_DATA": "데이터 없음",
+    "PREFLIGHT_DIAGNOSTICS": "실행 전 점검 결과",
+    "PREFLIGHT_OPTIONS": "실행 옵션",
+    "PREFLIGHT_START_ROW": "시작 순번:",
+    "PREFLIGHT_SPEED": "실행 속도:",
+    "PREFLIGHT_SPEED_NORMAL": "보통",
+    "PREFLIGHT_SPEED_SLOW": "느리게 (+0.5초)",
+    "PREFLIGHT_SPEED_VERY_SLOW": "매우 느리게 (+1초)",
+    "PREFLIGHT_SKIP_SETUP": "① 시작 단계 건너뛰기",
+    "PREFLIGHT_SKIP_CLEANUP": "③ 마무리 단계 건너뛰기",
+    "PREFLIGHT_WORKFLOW": "실행 방식:",
+    "PREFLIGHT_CLICK_START": "[실행 시작]을 누르면 카운트다운 후 실행됩니다.",
+    "PREFLIGHT_BLOCKED": "⚠ 위의 오류를 먼저 해결해야 실행할 수 있습니다.",
+    "PREFLIGHT_RUN_1_ROW": "1줄만 테스트",
+    "PREFLIGHT_START": "실행 시작",
+    "PREFLIGHT_COUNTDOWN": "{seconds}초 후 시작합니다... 지금 대상 창으로 전환하세요.",
+    "PREFLIGHT_ALL_PASSED": "✅ 모든 점검을 통과했습니다.",
+    "PREFLIGHT_ERROR_PREFIX": "🔴 오류: ",
+    "PREFLIGHT_WARNING_PREFIX": "🟡 주의: ",
+    "CANCEL": "취소",
+    "KEY_UNKNOWN_WARNING": "⚠ 알 수 없는 키 이름입니다. 아래 버튼을 눌러보세요.",
+    "WAIT_CHIP": "{seconds}초",
+    "ADVANCED_SAFETY_TOGGLE": "고급: 화면 확인",
+    "ADVANCED_SAFETY_TOGGLE_TIP": "이 단계 전(Guard)·후(Verify)에 화면을 확인하는 선택 기능입니다.",
+    "SAFETY_BOX_TITLE": "🛡️ 화면 확인 (Guard / Verify)",
+    "PARAMETERS_TITLE": "{type} 설정",
+    "CAPTURE_BANNER_PICK": "위치를 한 번 클릭하세요 · Esc 취소",
+    "CAPTURE_BANNER_REGION": "캡처할 영역을 드래그하세요 · Esc 취소",
+    "CAPTURE_BANNER_ELEMENT": "파란 테두리를 확인하고 클릭하세요 · Esc 취소",
+    "TYPE_WINDOW_SET_BOUNDS": "창 위치·크기",
+    "SUMMARY_CLICK_XY": "{sim}{double}클릭 ({x}, {y}){button}",
+    "SUMMARY_CLICK_SELECTOR": '{sim}🎯 [{control}] "{ident}" {double}클릭{button}',
+    "SUMMARY_SIM_BADGE": "⚡백그라운드 ",
+    "SUMMARY_DOUBLE": "더블",
+    "SUMMARY_BUTTON": " ({button} 버튼)",
+    "SUMMARY_ELEMENT": "요소",
+    "SUMMARY_TARGET": "대상",
+    "SUMMARY_CLICK_IMAGE": '"{image}" 이미지 클릭',
+    "SUMMARY_TYPE": '"{text}" 입력{mode}',
+    "SUMMARY_TYPE_KEYSTROKES": " [직접 타이핑]",
+    "SUMMARY_KEY": '"{keys}" 키 누르기{repeat}',
+    "SUMMARY_KEY_REPEAT": " ({count}회)",
+    "SUMMARY_WAIT": "{seconds}초 기다리기",
+    "SUMMARY_WAIT_IMAGE": '"{image}" 나타날 때까지 기다리기 (최대 {timeout}초)',
+    "SUMMARY_WAIT_IMAGE_GONE": '"{image}" 사라질 때까지 기다리기',
+    "SUMMARY_WINDOW_MAXIMIZE": '"{title}" 창 최대화',
+    "SUMMARY_WINDOW_BOUNDS": '"{title}" 창을 ({x}, {y}) 위치, {width}x{height} 크기로',
+    "SUMMARY_NO_WINDOW": "(창 미지정)",
+    "SUMMARY_GROUP": "그룹: {name} ({count}단계)",
+    "MOUSE_LEFT": "왼쪽",
+    "MOUSE_RIGHT": "오른쪽",
+    "MOUSE_MIDDLE": "가운데",
+    "STEP_WARN_EMPTY_TEXT": "⚠ 입력할 글자를 적어주세요",
+    "STEP_WARN_EMPTY_KEYS": "⚠ 누를 키를 정해주세요",
+    "STEP_WARN_EMPTY_IMAGE": "⚠ 찾을 이미지를 캡처해주세요",
+    "CTX_ADD_TO": "+ {target}에 동작 추가",
+    "CTX_ADD_CLICK": "👆 클릭 추가",
+    "CTX_ADD_TYPE": "⌨ 텍스트 입력 추가",
+    "CTX_ADD_KEY": "↵ 키 입력 추가",
+    "CTX_ADD_WAIT": "⏱ 대기 추가",
+    "CTX_ADD_IMAGE": "🖼 이미지 클릭 추가",
+    "CTX_ADD_WINDOW": "🪟 창 위치·크기 맞추기 추가",
+    "CTX_MOVE_TO_SECTION": "다른 구역으로 이동",
+    "CTX_MOVE_TO_SETUP": "① 시작할 때 1번 구역으로",
+    "CTX_MOVE_TO_PER_ROW": "② 각 줄마다 반복 구역으로",
+    "CTX_MOVE_TO_CLEANUP": "③ 끝날 때 1번 구역으로",
+    "TARGET_SECTION_SETUP": "① 시작",
+    "TARGET_SECTION_PER_ROW": "② 반복",
+    "TARGET_SECTION_CLEANUP": "③ 마무리",
+    "NO_MACRO_LOADED": "🎯 열린 매크로가 없습니다",
 }
 
 _KO_TOOLTIPS: dict[str, str] = {
@@ -801,6 +1126,11 @@ _KO_TOOLTIPS: dict[str, str] = {
         "한 번에 한 스텝씩 실행하며 사용자의 확인을 거쳐 진행합니다.",
         tip="새로 만든 매크로를 안전하게 디버깅할 때 유용합니다.",
     ),
+    "TEST_1_ROW": Strings.Tooltips.card(
+        "1줄 테스트",
+        "선택한 데이터 행(없으면 첫 번째 행) 1줄에 대해서만 매크로 전체를 실행해 봅니다.",
+        tip="짧은 카운트다운 동안 대상 창으로 전환하세요.",
+    ),
     "SAVE_MACRO": Strings.Tooltips.card(
         "매크로 패키지 저장",
         "현재 매크로 스텝과 캡처된 이미지 에셋을 .swm 파일 하나로 묶어 저장합니다.",
@@ -818,7 +1148,7 @@ _KO_TOOLTIPS: dict[str, str] = {
     "SECTION_PER_ROW": Strings.Tooltips.card(
         "PER ROW 구역 (데이터 행별 반복)",
         "엑셀/CSV 파일의 각 행마다 반복 실행되는 핵심 전표/데이터 입력 루프입니다.",
-        tip="{컬럼명} 변수를 사용해 행별 데이터를 자동으로 타이핑하세요.",
+        tip="[열 이름] 변수를 사용해 행별 데이터를 자동으로 타이핑하세요.",
     ),
     "SECTION_CLEANUP": Strings.Tooltips.card(
         "CLEANUP 구역 (종료 전 1회 실행)",
@@ -832,7 +1162,7 @@ _KO_TOOLTIPS: dict[str, str] = {
     ),
     "ADD_TYPE": Strings.Tooltips.card(
         "텍스트 입력 스텝 추가",
-        "고정 문자열이나 엑셀 데이터의 {컬럼명} 변수를 입력하는 동작을 추가합니다.",
+        "고정 문자열이나 엑셀 데이터의 [열 이름] 변수를 입력하는 동작을 추가합니다.",
         tip="클립보드 붙여넣기 또는 유니코드 타이핑 방식을 선택할 수 있습니다.",
     ),
     "ADD_KEY": Strings.Tooltips.card(
@@ -903,7 +1233,7 @@ _KO_TOOLTIPS: dict[str, str] = {
     ),
     "VARIABLE_BUTTON": Strings.Tooltips.card(
         "컬럼 변수 삽입",
-        "현재 선택된 텍스트 입력 칸에 해당 열의 {변수}를 삽입합니다.",
+        "현재 선택된 텍스트 입력 칸에 해당 열의 변수를 삽입합니다.",
         tip="실행 시 각 행의 실제 셀 값으로 자동 치환됩니다.",
     ),
 }
@@ -930,6 +1260,27 @@ def apply_language(lang: str = "en") -> str:
         setattr(Strings.Tooltips, key, target_tooltips.get(key, val))
 
     return normalized
+
+
+_ACTION_TYPE_KEYS = {
+    "click": "TYPE_CLICK",
+    "click_image": "TYPE_CLICK_IMAGE",
+    "type_text": "TYPE_TYPE_TEXT",
+    "key": "TYPE_KEY",
+    "wait": "TYPE_WAIT",
+    "wait_image": "TYPE_WAIT_IMAGE",
+    "wait_image_gone": "TYPE_WAIT_IMAGE_GONE",
+    "group": "TYPE_GROUP",
+    "window_set_bounds": "TYPE_WINDOW_SET_BOUNDS",
+}
+
+
+def action_type_label(action_type: str) -> str:
+    """Friendly action type name in Korean; English keeps the raw type id."""
+    if _CURRENT_LANG != "ko":
+        return action_type
+    key = _ACTION_TYPE_KEYS.get(action_type)
+    return getattr(Strings, key) if key else action_type
 
 
 # Canonical internal status codes -> localized display text helper
