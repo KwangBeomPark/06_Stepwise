@@ -52,6 +52,7 @@ from stepwise.engine.runner import ExecutionCallbacks, RunSummary, run_macro
 from stepwise.engine.timing import ExecutionController, SpeedMode
 from stepwise.services.hotkeys import GlobalHotkeyManager
 from stepwise.services.input_win import VK_MAP
+from stepwise.services.jiggler import safe_jiggler_interval
 from stepwise.services.screen import get_screen_info
 from stepwise.ui.action_tree import ActionTreeWidget
 from stepwise.ui.capture_overlay import CaptureOverlay
@@ -87,6 +88,8 @@ class ExecutionSnapshot:
     skip_cleanup: bool
     run_1_row: bool
     countdown_seconds: float = 0.0
+    anti_lock_jiggler: bool = False
+    jiggler_interval_seconds: float = 45.0
 
 
 class MainWindow(QMainWindow):
@@ -1195,6 +1198,10 @@ class MainWindow(QMainWindow):
             package_dir=self._package_dir,
             data_file_path=self._data_filepath,
             results_dir=str(self._user_settings.get("results_dir") or default_results_directory()),
+            jiggler_enabled=bool(self._user_settings.get("anti_lock_jiggler_enabled", False)),
+            jiggler_interval=safe_jiggler_interval(
+                self._user_settings.get("anti_lock_jiggler_interval_sec"), default=45.0
+            ),
             parent=self,
         )
         if dlg.exec() == SchedulerDialog.Accepted and dlg.confirmed_opts:
@@ -1292,6 +1299,17 @@ class MainWindow(QMainWindow):
                 skip_cleanup=opts.get("skip_cleanup", False),
                 run_1_row=opts.get("run_1_row", False),
                 countdown_seconds=float(opts.get("countdown_seconds", 0.0)),
+                anti_lock_jiggler=opts.get(
+                    "anti_lock_jiggler",
+                    bool(self._user_settings.get("anti_lock_jiggler_enabled", False)),
+                ),
+                jiggler_interval_seconds=safe_jiggler_interval(
+                    opts.get(
+                        "jiggler_interval_seconds",
+                        self._user_settings.get("anti_lock_jiggler_interval_sec"),
+                    ),
+                    default=45.0,
+                ),
             )
         except Exception as e:
             self._teardown_runner()
@@ -1363,6 +1381,8 @@ class MainWindow(QMainWindow):
                     data_filepath=snapshot.data_filepath,
                     results_dir=snapshot.results_dir,
                     row_numbers=snapshot.row_numbers,
+                    anti_lock_jiggler=snapshot.anti_lock_jiggler,
+                    jiggler_interval_seconds=snapshot.jiggler_interval_seconds,
                 )
             except Exception as e:
                 print(f"Unhandled exception in macro runner: {e}")

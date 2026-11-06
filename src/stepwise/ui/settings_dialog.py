@@ -6,11 +6,13 @@ import os
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDialog,
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -30,6 +32,7 @@ from stepwise.core.app_paths import (
     save_user_settings,
     user_settings_directory,
 )
+from stepwise.services.jiggler import safe_jiggler_interval
 from stepwise.ui.strings import Strings, apply_language, get_current_language
 from stepwise.ui.theme import apply_theme, get_current_theme
 
@@ -95,6 +98,30 @@ class SettingsDialog(QDialog):
         self.spin_countdown.setValue(int(self._settings.get("countdown_seconds", 3)))
         layout_gen.addRow("Countdown (seconds):", self.spin_countdown)
 
+        # Anti-Lock Jiggler Section
+        box_jiggler = QGroupBox(Strings.SETTINGS_JIGGLER_GROUP)
+        layout_jiggler = QVBoxLayout(box_jiggler)
+        layout_jiggler.setSpacing(6)
+
+        self.chk_jiggler = QCheckBox(Strings.SETTINGS_JIGGLER_ENABLE)
+        self.chk_jiggler.setChecked(bool(self._settings.get("anti_lock_jiggler_enabled", False)))
+        self.chk_jiggler.setToolTip(Strings.SETTINGS_JIGGLER_TIP)
+        layout_jiggler.addWidget(self.chk_jiggler)
+
+        h_jiggler_interval = QHBoxLayout()
+        lbl_interval = QLabel(Strings.SETTINGS_JIGGLER_INTERVAL)
+        self.spin_jiggler_interval = QSpinBox()
+        self.spin_jiggler_interval.setRange(10, 300)
+        raw_interval = self._settings.get("anti_lock_jiggler_interval_sec", 45)
+        j_interval = int(safe_jiggler_interval(raw_interval, default=45.0, min_val=10.0, max_val=300.0))
+        self.spin_jiggler_interval.setValue(j_interval)
+        self.spin_jiggler_interval.setSuffix(" " + Strings.SECONDS_UNIT)
+        h_jiggler_interval.addWidget(lbl_interval)
+        h_jiggler_interval.addWidget(self.spin_jiggler_interval)
+        h_jiggler_interval.addStretch()
+        layout_jiggler.addLayout(h_jiggler_interval)
+        layout_gen.addRow(box_jiggler)
+
         self.tabs.addTab(tab_gen, "General")
 
         # Tab 2: Hotkeys
@@ -147,7 +174,6 @@ class SettingsDialog(QDialog):
         layout_about.addWidget(lbl_about)
 
         # Update Check Section
-        from PySide6.QtWidgets import QCheckBox, QGroupBox
         box_update = QGroupBox("Auto-Update (GitHub Releases)")
         layout_update = QVBoxLayout(box_update)
         layout_update.setSpacing(8)
@@ -274,6 +300,8 @@ class SettingsDialog(QDialog):
         candidate["default_wait_before"] = self.spin_wait_before.value()
         candidate["poll_interval"] = self.spin_poll.value()
         candidate["auto_check_updates"] = bool(self.chk_auto_update.isChecked())
+        candidate["anti_lock_jiggler_enabled"] = bool(self.chk_jiggler.isChecked())
+        candidate["anti_lock_jiggler_interval_sec"] = self.spin_jiggler_interval.value()
         try:
             save_user_settings(candidate)
         except OSError:

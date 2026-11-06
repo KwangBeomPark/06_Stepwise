@@ -28,6 +28,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "language": "ko",
     "theme": "dark",
     "auto_check_updates": True,
+    "anti_lock_jiggler_enabled": False,
+    "anti_lock_jiggler_interval_sec": 45,
     "window_geometry": None,
     "splitter_state": None,
 }

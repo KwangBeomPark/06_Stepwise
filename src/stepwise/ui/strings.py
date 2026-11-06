@@ -266,6 +266,13 @@ class Strings:
     SCHEDULER_STOP_QUEUE = "Stop immediately and save failure screenshot (Fail-Fast)"
     SCHEDULER_CONTINUE_NEXT = "Stop immediately (Fail-Fast)"
     SCHEDULER_LOCK_AFTER = "Lock Windows screen (LockWorkStation) after scheduled completion"
+    SCHEDULER_ANTI_LOCK_JIGGLER = "Hold Anti-Lock Jiggler while armed (prevents sleep & lock)"
+    SCHEDULER_ANTI_LOCK_JIGGLER_TIP = "Sends an unassigned virtual key pulse every {seconds}s while waiting for scheduled launch to prevent Corporate GPO inactivity lock."
+    SETTINGS_JIGGLER_GROUP = "Screen Lock Prevention (Anti-Lock Jiggler)"
+    SETTINGS_JIGGLER_ENABLE = "Prevent Windows screen lock during execution & scheduling"
+    SETTINGS_JIGGLER_TIP = "Periodically sends an invisible virtual key pulse (VK_F15) to keep the Windows idle timer reset, preventing GPO inactivity screen lock and RDP session disconnects."
+    SETTINGS_JIGGLER_INTERVAL = "Jiggle Interval:"
+    SECONDS_UNIT = "sec"
     SCHEDULER_PRE_ARM_TITLE = "Environment & Session Readiness Diagnostics"
     SCHEDULER_CHECKLIST_TITLE = "Overnight Cloud PC Safety Checklist (Required)"
     SCHEDULER_CHK_DONT_CLOSE = "I will NOT close or minimize the Cloud PC / RDP window (covering with other windows is OK)"
@@ -904,6 +911,13 @@ _KO_STRINGS: dict[str, str] = {
     "SCHEDULER_STOP_QUEUE": "즉시 중단 및 실패 스크린샷 기록 (Fail-Fast 안전 우선)",
     "SCHEDULER_CONTINUE_NEXT": "즉시 중단 (Fail-Fast)",
     "SCHEDULER_LOCK_AFTER": "예약 실행 정상 완료 후 Windows 화면 잠금(LockWorkStation)",
+    "SCHEDULER_ANTI_LOCK_JIGGLER": "예약 대기 중 화면 잠금 방지 (Anti-Lock Jiggler)",
+    "SCHEDULER_ANTI_LOCK_JIGGLER_TIP": "예약 시각까지 대기하는 동안 {seconds}초마다 보이지 않는 무영향 신호를 전송하여 사내 보안 잠금으로 화면이 꺼지는 것을 방지합니다.",
+    "SETTINGS_JIGGLER_GROUP": "화면 자동 잠금 방지 (Anti-Lock Jiggler)",
+    "SETTINGS_JIGGLER_ENABLE": "실행 및 예약 대기 중 화면 자동 잠금 방지",
+    "SETTINGS_JIGGLER_TIP": "Windows 유휴 타이머를 주기적으로 초기화하는 무영향 가상 키(F15) 신호를 보내 사내 보안 정책(GPO)으로 인한 화면 잠금 및 원격 데스크톱 세션 끊김을 방지합니다.",
+    "SETTINGS_JIGGLER_INTERVAL": "방지 신호 주기:",
+    "SECONDS_UNIT": "초",
     "SCHEDULER_PRE_ARM_TITLE": "야간 무인 실행 환경 & 정책 사전 진단",
     "SCHEDULER_CHECKLIST_TITLE": "야간 Cloud PC 필수 안전 수칙 확인 (체크 필수)",
     "SCHEDULER_CHK_DONT_CLOSE": "Cloud PC(원격 데스크톱) 창을 닫거나 최소화하지 않겠습니다 (다른 창 뒤에 두는 것은 가능)",

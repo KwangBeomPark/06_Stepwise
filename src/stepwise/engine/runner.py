@@ -19,6 +19,7 @@ from stepwise.engine.actions import _get_val, execute_action
 from stepwise.engine.errors import AbortRequested, StepFailure
 from stepwise.engine.results import ResultsManager, RowResultRecord, compute_row_hash
 from stepwise.engine.timing import ExecutionController, SpeedMode
+from stepwise.services.jiggler import active_jiggler
 from stepwise.services.power import prevent_screen_sleep
 from stepwise.services.screen import capture_screen
 
@@ -128,6 +129,8 @@ def run_macro(
     data_filepath: str | None = None,
     row_numbers: Sequence[int] | None = None,
     results_manager: ResultsManager | None = None,
+    anti_lock_jiggler: bool = False,
+    jiggler_interval_seconds: float = 45.0,
 ) -> RunSummary:
     """Execute complete macro workflow."""
     ctrl = controller or ExecutionController()
@@ -197,7 +200,11 @@ def run_macro(
     current_row_hash = ""
     current_row_active = False
 
-    with prevent_screen_sleep():
+    with prevent_screen_sleep(), active_jiggler(
+        enabled=anti_lock_jiggler,
+        interval_seconds=jiggler_interval_seconds,
+        should_pulse=lambda: not ctrl.is_paused() and not ctrl.is_stopped(),
+    ):
         try:
             # 1. SETUP SECTION (Runs once)
             if not skip_setup and setup_items:

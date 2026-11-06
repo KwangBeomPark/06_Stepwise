@@ -36,6 +36,7 @@ from PySide6.QtWidgets import (
 
 from stepwise.core.models import Macro
 from stepwise.engine.timing import SpeedMode
+from stepwise.services.jiggler import Jiggler, safe_jiggler_interval
 from stepwise.services.power import set_awake_state
 from stepwise.services.schedule_diag import (
     ScheduleDiagItem,
@@ -63,6 +64,8 @@ class SchedulerDialog(QDialog):
         package_dir: str | None = None,
         data_file_path: str | None = None,
         results_dir: str = "results",
+        jiggler_enabled: bool = False,
+        jiggler_interval: float = 45.0,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -75,8 +78,10 @@ class SchedulerDialog(QDialog):
         self.package_dir = package_dir
         self.data_file_path = data_file_path
         self.results_dir = results_dir
+        self._jiggler_interval = safe_jiggler_interval(jiggler_interval, default=45.0, min_val=5.0)
 
         self._is_armed = False
+        self._jiggler: Jiggler | None = None
         self._target_dt: datetime | None = None
         self.confirmed_opts: dict[str, Any] = {}
 
@@ -124,6 +129,12 @@ class SchedulerDialog(QDialog):
         self.chk_lock_after = QCheckBox(Strings.SCHEDULER_LOCK_AFTER)
         self.chk_lock_after.setChecked(False)
         cfg_form.addRow("", self.chk_lock_after)
+
+        self.chk_anti_lock = QCheckBox(Strings.SCHEDULER_ANTI_LOCK_JIGGLER)
+        self.chk_anti_lock.setChecked(bool(jiggler_enabled))
+        tip_text = Strings.SCHEDULER_ANTI_LOCK_JIGGLER_TIP.format(seconds=int(self._jiggler_interval))
+        self.chk_anti_lock.setToolTip(tip_text)
+        cfg_form.addRow("", self.chk_anti_lock)
 
         layout.addWidget(self.cfg_box)
 
@@ -261,6 +272,10 @@ class SchedulerDialog(QDialog):
         self._update_arm_button_state()
 
         set_awake_state(True)
+        if self.chk_anti_lock.isChecked():
+            if self._jiggler is None:
+                self._jiggler = Jiggler(interval_seconds=self._jiggler_interval)
+            self._jiggler.start()
         self._update_armed_banner(now=now)
         self._tick_timer.start(1000)
         return self._target_dt
@@ -268,6 +283,9 @@ class SchedulerDialog(QDialog):
     def disarm_schedule(self) -> None:
         """Cancel Armed Mode and release awake state."""
         self._tick_timer.stop()
+        if self._jiggler:
+            self._jiggler.stop()
+            self._jiggler = None
         if self._is_armed:
             set_awake_state(False)
         self._is_armed = False
@@ -335,6 +353,9 @@ class SchedulerDialog(QDialog):
 
     def _trigger_now(self, is_scheduled: bool = False) -> None:
         self._tick_timer.stop()
+        if self._jiggler:
+            self._jiggler.stop()
+            self._jiggler = None
         if self._is_armed:
             set_awake_state(False)
             self._is_armed = False
@@ -350,6 +371,8 @@ class SchedulerDialog(QDialog):
             "scheduled": is_scheduled,
             "on_fail": str(self.cmb_on_fail.currentData() or "stop"),
             "lock_after": bool(is_scheduled and self.chk_lock_after.isChecked()),
+            "anti_lock_jiggler": self.chk_anti_lock.isChecked(),
+            "jiggler_interval_seconds": self._jiggler_interval,
         }
         self.confirmed_opts = opts
         self.schedule_triggered.emit(opts)
@@ -363,6 +386,9 @@ class SchedulerDialog(QDialog):
     def done(self, result: int) -> None:
         """Ensure any dialog dismissal path releases timers and awake state."""
         self._tick_timer.stop()
+        if self._jiggler:
+            self._jiggler.stop()
+            self._jiggler = None
         if self._is_armed:
             set_awake_state(False)
             self._is_armed = False
