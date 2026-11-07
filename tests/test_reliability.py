@@ -489,6 +489,7 @@ def test_clipboard_failure_cannot_select_or_paste_stale_text() -> None:
 def test_clipboard_write_precedes_selection_and_restoration() -> None:
     events = []
     with (
+        patch.object(clipboard, "snapshot_restorable_text", return_value="original"),
         patch.object(clipboard, "get_clipboard_text", return_value="original"),
         patch.object(clipboard, "get_clipboard_sequence_number", return_value=100),
         patch.object(
