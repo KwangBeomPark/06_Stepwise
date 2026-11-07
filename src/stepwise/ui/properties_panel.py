@@ -355,12 +355,12 @@ class PropertiesPanel(QWidget):
             self.txt_text = QLineEdit(action.text)
             self.txt_text.setPlaceholderText("Enter text or {ColumnName}")
 
-            if self._available_headers:
-                variables = [f"{{{h}}}" for h in self._available_headers]
-                completer = QCompleter(variables, self.txt_text)
-                completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
-                completer.setFilterMode(Qt.MatchFlag.MatchContains)
-                self.txt_text.setCompleter(completer)
+            system_vars = ["{TODAY}", "{NOW}", "{ROW_NUM}"]
+            all_vars = [f"{{{h}}}" for h in self._available_headers] + system_vars
+            completer = QCompleter(all_vars, self.txt_text)
+            completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+            completer.setFilterMode(Qt.MatchFlag.MatchContains)
+            self.txt_text.setCompleter(completer)
 
             act_layout.addRow(Strings.TEXT_TO_TYPE, self.txt_text)
 
@@ -797,8 +797,9 @@ class PropertiesPanel(QWidget):
             self._populate_column_chips(self.chips_widget, self._current_action)
 
         if hasattr(self, "txt_text") and self.txt_text is not None:
-            variables = [f"{{{h}}}" for h in headers]
-            completer = QCompleter(variables, self.txt_text)
+            system_vars = ["{TODAY}", "{NOW}", "{ROW_NUM}"]
+            all_vars = [f"{{{h}}}" for h in headers] + system_vars
+            completer = QCompleter(all_vars, self.txt_text)
             completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
             completer.setFilterMode(Qt.MatchFlag.MatchContains)
             self.txt_text.setCompleter(completer)

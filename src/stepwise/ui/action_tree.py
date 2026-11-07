@@ -121,7 +121,11 @@ class ActionTreeWidget(QWidget):
     request_add_action = Signal(str, str, int, object)  # type, section, index, parent group
     request_move_section = Signal(object, str)  # (action_item, target_section_name)
     request_delete_action = Signal(object)  # (action_item)
+    request_delete_actions = Signal(list)  # list[ActionItem]
     request_duplicate_action = Signal(object)  # (action_item)
+    request_copy_actions = Signal(list)  # list[ActionItem]
+    request_cut_actions = Signal(list)  # list[ActionItem]
+    request_paste_actions = Signal()
     request_move_up = Signal(object)  # (action_item)
     request_move_down = Signal(object)  # (action_item)
 
@@ -161,7 +165,7 @@ class ActionTreeWidget(QWidget):
         self.tree = QTreeWidget()
         self._update_headers()
         self.tree.setDragDropMode(QTreeWidget.NoDragDrop)
-        self.tree.setSelectionMode(QTreeWidget.SingleSelection)
+        self.tree.setSelectionMode(QTreeWidget.SelectionMode.ExtendedSelection)
         self.tree.setAlternatingRowColors(True)
 
         header = self.tree.header()
@@ -191,6 +195,24 @@ class ActionTreeWidget(QWidget):
         self.act_move_down.setShortcutContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         self.act_move_down.triggered.connect(self._on_shortcut_move_down)
         self.tree.addAction(self.act_move_down)
+
+        self.act_copy = QAction("Copy", self)
+        self.act_copy.setShortcut(Qt.Key.Key_C | Qt.KeyboardModifier.ControlModifier)
+        self.act_copy.setShortcutContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self.act_copy.triggered.connect(self._on_shortcut_copy)
+        self.tree.addAction(self.act_copy)
+
+        self.act_cut = QAction("Cut", self)
+        self.act_cut.setShortcut(Qt.Key.Key_X | Qt.KeyboardModifier.ControlModifier)
+        self.act_cut.setShortcutContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self.act_cut.triggered.connect(self._on_shortcut_cut)
+        self.tree.addAction(self.act_cut)
+
+        self.act_paste = QAction("Paste", self)
+        self.act_paste.setShortcut(Qt.Key.Key_V | Qt.KeyboardModifier.ControlModifier)
+        self.act_paste.setShortcutContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self.act_paste.triggered.connect(self._on_shortcut_paste)
+        self.tree.addAction(self.act_paste)
 
         self.act_dup = QAction("Duplicate", self)
         self.act_dup.setShortcut(Qt.Key.Key_D | Qt.KeyboardModifier.ControlModifier)
@@ -238,9 +260,45 @@ class ActionTreeWidget(QWidget):
     def _get_selected_action(self) -> ActionItem | None:
         selected = self.tree.selectedItems()
         if not selected:
+            curr = self.tree.currentItem()
+            if curr:
+                data = curr.data(0, Qt.ItemDataRole.UserRole)
+                return data if isinstance(data, ActionItem) else None
             return None
         data = selected[0].data(0, Qt.ItemDataRole.UserRole)
         return data if isinstance(data, ActionItem) else None
+
+    def _get_selected_actions(self) -> list[ActionItem]:
+        """Return all selected ActionItems in document order."""
+        selected_ids = {
+            item.data(0, Qt.ItemDataRole.UserRole).id
+            for item in self.tree.selectedItems()
+            if isinstance(item.data(0, Qt.ItemDataRole.UserRole), ActionItem)
+        }
+        if not selected_ids:
+            curr = self.tree.currentItem()
+            if curr and isinstance(curr.data(0, Qt.ItemDataRole.UserRole), ActionItem):
+                selected_ids = {curr.data(0, Qt.ItemDataRole.UserRole).id}
+            else:
+                return []
+        if not self._macro:
+            return []
+
+        ordered: list[ActionItem] = []
+
+        def walk(items: list[ActionItem]) -> None:
+            for act in items:
+                if act.id in selected_ids:
+                    ordered.append(act)
+                    # When a group is selected, its children are already included within it;
+                    # do not collect descendants separately to prevent duplicate pasting/deleting.
+                else:
+                    walk(act.items)
+
+        walk(self._macro.setup)
+        walk(self._macro.per_row)
+        walk(self._macro.cleanup)
+        return ordered
 
     def _on_shortcut_move_up(self) -> None:
         act = self._get_selected_action()
@@ -252,15 +310,30 @@ class ActionTreeWidget(QWidget):
         if act:
             self.request_move_down.emit(act)
 
+    def _on_shortcut_copy(self) -> None:
+        acts = self._get_selected_actions()
+        if acts:
+            self.request_copy_actions.emit(acts)
+
+    def _on_shortcut_cut(self) -> None:
+        acts = self._get_selected_actions()
+        if acts:
+            self.request_cut_actions.emit(acts)
+
+    def _on_shortcut_paste(self) -> None:
+        self.request_paste_actions.emit()
+
     def _on_shortcut_duplicate(self) -> None:
         act = self._get_selected_action()
         if act:
             self.request_duplicate_action.emit(act)
 
     def _on_shortcut_delete(self) -> None:
-        act = self._get_selected_action()
-        if act:
-            self.request_delete_action.emit(act)
+        acts = self._get_selected_actions()
+        if len(acts) > 1:
+            self.request_delete_actions.emit(acts)
+        elif len(acts) == 1:
+            self.request_delete_action.emit(acts[0])
 
     def get_current_target_section(self) -> tuple[str, int]:
         """Return the section and index within the selected item's owning list."""
@@ -273,10 +346,9 @@ class ActionTreeWidget(QWidget):
             return ("per_row", None, 0)
 
         selected = self.tree.selectedItems()
-        if not selected:
+        item = selected[0] if selected else self.tree.currentItem()
+        if not item:
             return ("per_row", None, len(self._macro.per_row))
-
-        item = selected[0]
         data = item.data(0, Qt.ItemDataRole.UserRole)
 
         # Header or empty placeholder selected -> insert at index 0 (top of section)
@@ -332,8 +404,10 @@ class ActionTreeWidget(QWidget):
                 section=sec_display, group=action.name or Strings.TYPE_GROUP
             )
         elif action is not None:
+            node = selected[0] if selected else self.tree.currentItem()
+            step_text = node.text(0) if node else ""
             target_str = Strings.INSERT_TARGET_AFTER.format(
-                section=sec_display, step=selected[0].text(0)
+                section=sec_display, step=step_text
             )
         else:
             target_str = Strings.INSERT_TARGET_END.format(section=sec_display)
@@ -341,11 +415,16 @@ class ActionTreeWidget(QWidget):
 
     def _show_context_menu(self, pos: QPoint) -> None:
         item = self.tree.itemAt(pos)
+        selected_items = self.tree.selectedItems()
         if item:
-            self.tree.setCurrentItem(item)
+            if item not in selected_items:
+                self.tree.clearSelection()
+                item.setSelected(True)
+                self.tree.setCurrentItem(item)
         menu = QMenu(self)
 
         sec_name, parent, ins_idx = self.get_current_insertion_target()
+        selected_acts = self._get_selected_actions()
 
         # 1. Quick Add Actions
         menu_add = menu.addMenu(
@@ -382,11 +461,25 @@ class ActionTreeWidget(QWidget):
             lambda: self.request_add_action.emit("window_set_bounds", sec_name, ins_idx, parent)
         )
 
-        if item:
-            data = item.data(0, Qt.ItemDataRole.UserRole)
-            if isinstance(data, ActionItem):
-                menu.addSeparator()
+        menu.addSeparator()
 
+        # Copy & Cut (enabled if actions selected)
+        act_copy = menu.addAction(f"📋 {Strings.COPY}")
+        act_copy.setEnabled(bool(selected_acts))
+        act_copy.triggered.connect(self._on_shortcut_copy)
+
+        act_cut = menu.addAction(f"✂️ {Strings.CUT}")
+        act_cut.setEnabled(bool(selected_acts))
+        act_cut.triggered.connect(self._on_shortcut_cut)
+
+        # Paste
+        act_paste = menu.addAction(f"📥 {Strings.PASTE}")
+        act_paste.triggered.connect(self._on_shortcut_paste)
+
+        if selected_acts:
+            menu.addSeparator()
+            if len(selected_acts) == 1:
+                data = selected_acts[0]
                 act_up = menu.addAction(Strings.MOVE_UP)
                 act_up.triggered.connect(lambda: self.request_move_up.emit(data))
 
@@ -410,8 +503,8 @@ class ActionTreeWidget(QWidget):
                 act_dup = menu.addAction(f"📋 {Strings.DUPLICATE}")
                 act_dup.triggered.connect(lambda: self.request_duplicate_action.emit(data))
 
-                act_del = menu.addAction(f"🗑 {Strings.DELETE}")
-                act_del.triggered.connect(lambda: self.request_delete_action.emit(data))
+            act_del = menu.addAction(f"🗑 {Strings.DELETE}")
+            act_del.triggered.connect(self._on_shortcut_delete)
 
         menu.exec(self.tree.viewport().mapToGlobal(pos))
 
@@ -447,13 +540,21 @@ class ActionTreeWidget(QWidget):
             placeholder.setForeground(col, QBrush(QColor(t["text_muted"])))
         parent.addChild(placeholder)
 
-    def rebuild_tree(self, select_id: str | None = None) -> None:
+    def rebuild_tree(self, select_id: str | list[str] | None = None) -> None:
         """Reconstruct tree nodes from self._macro and restore selection."""
         t = get_theme_tokens()
-        target_restore_key = select_id
+        target_restore_key: str | list[str] | None = select_id
         if not target_restore_key:
             curr_selected = self.tree.selectedItems()
-            if curr_selected:
+            if len(curr_selected) > 1:
+                keys = []
+                for it in curr_selected:
+                    d = it.data(0, Qt.ItemDataRole.UserRole)
+                    if isinstance(d, ActionItem):
+                        keys.append(d.id)
+                if keys:
+                    target_restore_key = keys
+            elif len(curr_selected) == 1:
                 d = curr_selected[0].data(0, Qt.ItemDataRole.UserRole)
                 if isinstance(d, ActionItem):
                     target_restore_key = d.id
@@ -539,8 +640,13 @@ class ActionTreeWidget(QWidget):
         self._apply_filter()
 
         # Selection restoration
-        node_to_select = None
-        if target_restore_key:
+        nodes_to_select: list[QTreeWidgetItem] = []
+        if isinstance(target_restore_key, (list, tuple)):
+            for key in target_restore_key:
+                node = self._find_node_by_step_id(str(key))
+                if node:
+                    nodes_to_select.append(node)
+        elif target_restore_key:
             if isinstance(target_restore_key, str) and (
                 target_restore_key.startswith("header_") or target_restore_key.startswith("empty_")
             ):
@@ -554,19 +660,25 @@ class ActionTreeWidget(QWidget):
                             return found
                     return None
 
-                node_to_select = find_marker(self.tree.invisibleRootItem())
+                node = find_marker(self.tree.invisibleRootItem())
+                if node:
+                    nodes_to_select.append(node)
             else:
-                node_to_select = self._find_node_by_step_id(str(target_restore_key))
+                node = self._find_node_by_step_id(str(target_restore_key))
+                if node:
+                    nodes_to_select.append(node)
 
-        if node_to_select:
-            if select_id and node_to_select.isHidden():
-                self.txt_search.clear()
-            ancestor = node_to_select.parent()
-            while ancestor is not None:
-                ancestor.setExpanded(True)
-                ancestor = ancestor.parent()
-            self.tree.setCurrentItem(node_to_select)
-            self.tree.scrollToItem(node_to_select)
+        if nodes_to_select:
+            self.tree.setCurrentItem(nodes_to_select[0])
+            for node in nodes_to_select:
+                if select_id and node.isHidden():
+                    self.txt_search.clear()
+                ancestor = node.parent()
+                while ancestor is not None:
+                    ancestor.setExpanded(True)
+                    ancestor = ancestor.parent()
+                node.setSelected(True)
+            self.tree.scrollToItem(nodes_to_select[0])
 
         self.tree.blockSignals(False)
         self._on_selection_changed()
@@ -632,15 +744,21 @@ class ActionTreeWidget(QWidget):
         self._update_target_label()
         selected_items = self.tree.selectedItems()
         if not selected_items:
+            curr = self.tree.currentItem()
+            if curr and curr is not self.tree.invisibleRootItem():
+                data = curr.data(0, Qt.ItemDataRole.UserRole)
+                if isinstance(data, ActionItem):
+                    self.action_selected.emit(data)
+                    return
             self.action_selected.emit(None)
             return
 
-        item = selected_items[0]
-        data = item.data(0, Qt.ItemDataRole.UserRole)
-        if isinstance(data, ActionItem):
-            self.action_selected.emit(data)
-        else:
-            self.action_selected.emit(None)
+        if len(selected_items) == 1:
+            data = selected_items[0].data(0, Qt.ItemDataRole.UserRole)
+            if isinstance(data, ActionItem):
+                self.action_selected.emit(data)
+                return
+        self.action_selected.emit(None)
 
     def _on_item_changed(self, item: QTreeWidgetItem, column: int) -> None:
         if column == 1:

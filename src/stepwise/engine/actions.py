@@ -269,7 +269,12 @@ def execute_action(
 
     elif act_type == "type_text":
         raw_text = str(_get_val(action, "text", ""))
-        text_to_type = substitute_variables(raw_text, row_data or {}, strict=True)
+        text_to_type = substitute_variables(
+            raw_text,
+            row_data or {},
+            strict=True,
+            context={"_ROW_NUM": row_number} if row_number is not None else None,
+        )
         mode = _get_val(action, "mode", "paste").lower()
         select_all = bool(_get_val(action, "select_all_first", False))
 
@@ -437,7 +442,12 @@ def execute_action(
             )
 
         try:
-            title = substitute_variables(title_raw, row_data or {}, strict=True)
+            title = substitute_variables(
+                title_raw,
+                row_data or {},
+                strict=True,
+                context={"_ROW_NUM": row_number} if row_number is not None else None,
+            )
         except Exception as e:
             raise StepFailure(
                 f"Variable substitution failed in window title '{title_raw}': {e}",

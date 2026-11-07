@@ -13,10 +13,12 @@ from __future__ import annotations
 import csv
 import datetime
 import os
+import re
 from typing import Any
 
 import charset_normalizer
 import openpyxl
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
 
 class DuplicateHeaderError(ValueError):
@@ -239,3 +241,180 @@ def _read_csv(
             row_numbers.append(curr_row_idx)
 
     return headers, rows, row_numbers
+
+
+def export_execution_results_xlsx(
+    headers: list[str],
+    rows: list[dict[str, str]],
+    row_numbers: list[int],
+    row_statuses: dict[int, str],
+    source_filepath: str | None = None,
+    output_filepath: str | None = None,
+    row_details: dict[int, dict[str, str]] | None = None,
+) -> str:
+    """Export original data rows with appended execution result columns to a new .xlsx file.
+
+    Columns appended:
+    - Stepwise_상태 (Status: Done, Failed, Interrupted, Needs Verification, Skipped, Pending)
+    - Stepwise_완료일시 (Completed At / Execution Time)
+    - Stepwise_오류내용 (Error reason / failure detail if any)
+
+    Returns the absolute path of the generated .xlsx file.
+    Original source file is never modified.
+    """
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    if ws is None:
+        ws = wb.create_sheet(title="Stepwise Results")
+    else:
+        ws.title = "Stepwise Results"
+
+    header_font = Font(name="Segoe UI", size=11, bold=True, color="FFFFFF")
+    data_header_fill = PatternFill(start_color="334155", end_color="334155", fill_type="solid")
+    result_header_fill = PatternFill(start_color="0284C7", end_color="0284C7", fill_type="solid")
+
+    status_styles = {
+        "Done": {
+            "fill": PatternFill(start_color="E6F4EA", end_color="E6F4EA", fill_type="solid"),
+            "font": Font(name="Segoe UI", size=10, bold=True, color="137333"),
+        },
+        "Failed": {
+            "fill": PatternFill(start_color="FCE8E6", end_color="FCE8E6", fill_type="solid"),
+            "font": Font(name="Segoe UI", size=10, bold=True, color="C5221F"),
+        },
+        "Interrupted": {
+            "fill": PatternFill(start_color="FEF7E0", end_color="FEF7E0", fill_type="solid"),
+            "font": Font(name="Segoe UI", size=10, bold=True, color="B06000"),
+        },
+        "Needs Verification": {
+            "fill": PatternFill(start_color="FEF7E0", end_color="FEF7E0", fill_type="solid"),
+            "font": Font(name="Segoe UI", size=10, bold=True, color="B06000"),
+        },
+        "Skipped": {
+            "fill": PatternFill(start_color="F1F3F4", end_color="F1F3F4", fill_type="solid"),
+            "font": Font(name="Segoe UI", size=10, color="5F6368"),
+        },
+        "Pending": {
+            "fill": PatternFill(fill_type=None),
+            "font": Font(name="Segoe UI", size=10, color="64748B"),
+        },
+    }
+
+    thin_border = Border(
+        left=Side(style="thin", color="E2E8F0"),
+        right=Side(style="thin", color="E2E8F0"),
+        top=Side(style="thin", color="E2E8F0"),
+        bottom=Side(style="thin", color="E2E8F0"),
+    )
+
+    result_columns = ["Stepwise_상태", "Stepwise_완료일시", "Stepwise_오류내용"]
+    all_headers = list(headers) + result_columns
+
+    # 1. Header row
+    ws.append(all_headers)
+    for col_idx in range(1, len(all_headers) + 1):
+        cell = ws.cell(row=1, column=col_idx)
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+        if col_idx <= len(headers):
+            cell.fill = data_header_fill
+        else:
+            cell.fill = result_header_fill
+
+    # Check source immutability against explicit output_filepath
+    if source_filepath and output_filepath:
+        if os.path.abspath(source_filepath).lower() == os.path.abspath(output_filepath).lower():
+            raise ValueError(
+                "Output file path cannot be identical to the source data file. "
+                "Stepwise strictly enforces source data immutability."
+            )
+
+    # 2. Data rows
+    def _sanitize(val: object) -> str:
+        if val is None:
+            return ""
+        s = str(val)
+        # Strip ASCII control characters incompatible with XML/OpenPyXL
+        return re.sub(r"[\x00-\x08\x0b-\x0c\x0e-\x1f]", "", s)
+
+    for idx, row in enumerate(rows):
+        row_num = row_numbers[idx] if idx < len(row_numbers) else (idx + 1)
+        raw_status = str(row_statuses.get(row_num, "Pending")).strip()
+        canonical_status = "Pending"
+        for code in ("Done", "Failed", "Interrupted", "Needs Verification", "Skipped", "Pending"):
+            if code.lower() == raw_status.lower() or (raw_status and code.lower() in raw_status.lower()):
+                canonical_status = code
+                break
+
+        detail = (row_details or {}).get(row_num, {})
+        timestamp = detail.get("timestamp", "")
+
+        reason = detail.get("reason", "")
+        if not reason and canonical_status in ("Interrupted", "Needs Verification"):
+            reason = "작업 중단됨 (ERP 확인 필요)"
+
+        excel_row_idx = idx + 2
+        # Write source data cells with formula-injection guard
+        for c_idx, h in enumerate(headers):
+            cell = ws.cell(row=excel_row_idx, column=c_idx + 1)
+            raw_v = _sanitize(row.get(h, ""))
+            cell.value = raw_v
+            # Force string data type if starting with formula triggers
+            if raw_v.startswith(("=", "+", "-", "@")):
+                cell.data_type = "s"
+            cell.border = thin_border
+
+        # Result columns: Status, FinishedAt, Reason
+        status_col = len(headers) + 1
+        st_cell = ws.cell(row=excel_row_idx, column=status_col)
+        st_cell.value = canonical_status
+        st_cell.data_type = "s"
+        st_cell.alignment = Alignment(horizontal="center", vertical="center")
+        style_info = status_styles.get(canonical_status, status_styles["Pending"])
+        if style_info.get("fill"):
+            st_cell.fill = style_info["fill"]
+        if style_info.get("font"):
+            st_cell.font = style_info["font"]
+        st_cell.border = thin_border
+
+        ts_cell = ws.cell(row=excel_row_idx, column=status_col + 1)
+        ts_cell.value = _sanitize(timestamp)
+        ts_cell.data_type = "s"
+        ts_cell.alignment = Alignment(horizontal="center", vertical="center")
+        ts_cell.border = thin_border
+
+        rs_cell = ws.cell(row=excel_row_idx, column=status_col + 2)
+        clean_reason = _sanitize(reason)
+        rs_cell.value = clean_reason
+        if clean_reason.startswith(("=", "+", "-", "@")):
+            rs_cell.data_type = "s"
+        rs_cell.border = thin_border
+
+    # 3. Column widths
+    for col in ws.columns:
+        max_len = 0
+        col_letter = col[0].column_letter
+        for cell in col:
+            val_str = str(cell.value or "")
+            val_first_line = val_str.split("\n")[0] if val_str else ""
+            max_len = max(max_len, len(val_first_line))
+        ws.column_dimensions[col_letter].width = min(max(max_len + 3, 12), 60)
+
+    # 4. Resolve output path
+    if not output_filepath:
+        now_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        if source_filepath and os.path.exists(source_filepath):
+            dir_name = os.path.dirname(os.path.abspath(source_filepath))
+            stem = os.path.splitext(os.path.basename(source_filepath))[0]
+            output_filepath = os.path.join(dir_name, f"{stem}_결과_{now_str}.xlsx")
+        else:
+            output_filepath = os.path.abspath(f"Stepwise_결과_{now_str}.xlsx")
+
+    # Prevent accidental overwrite of source file even if generated output lands on same path
+    if source_filepath and os.path.abspath(source_filepath).lower() == os.path.abspath(output_filepath).lower():
+        base, ext = os.path.splitext(output_filepath)
+        output_filepath = f"{base}_결과{ext}"
+
+    os.makedirs(os.path.dirname(os.path.abspath(output_filepath)), exist_ok=True)
+    wb.save(output_filepath)
+    return os.path.abspath(output_filepath)

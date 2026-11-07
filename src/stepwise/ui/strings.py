@@ -108,10 +108,17 @@ class Strings:
     BTN_ADD_WIN = "🪟 + Window"
     MOVE_UP = "↑ Move Up"
     MOVE_DOWN = "↓ Move Down"
+    COPY = "Copy"
+    CUT = "Cut"
+    PASTE = "Paste"
     DUPLICATE = "Duplicate"
     DELETE = "Delete"
     GROUP = "Group"
     UNGROUP = "Ungroup"
+    COPIED_N_STEPS = "Copied {count} step(s)"
+    CUT_N_STEPS = "Cut {count} step(s)"
+    PASTED_N_STEPS = "Pasted {count} step(s)"
+    DELETED_N_STEPS = "Deleted {count} step(s)"
 
     # Search & Filter
     SEARCH_ACTIONS = "Search actions..."
@@ -235,6 +242,26 @@ class Strings:
     STATUS_FAILED = "Failed"
     STATUS_INTERRUPTED = "Interrupted"
     STATUS_SKIPPED = "Skipped"
+    EXPORT_RESULTS = "Export Results (.xlsx)"
+    EXPORT_SUCCESS_TITLE = "Export Results"
+    EXPORT_SUCCESS_MSG = "Execution results successfully saved to:\n{path}"
+    EXPORT_ERROR_TITLE = "Export Error"
+    EXPORT_ERROR_MSG = "Failed to export execution results:\n{error}"
+    EXPORT_NO_DATA = "No data loaded to export."
+
+    # Webhook notifications
+    WEBHOOK_SETTINGS_TAB = "Notifications"
+    WEBHOOK_GROUP = "Execution Completion Webhook (Slack / Teams)"
+    WEBHOOK_ENABLE = "Send notification upon run completion"
+    WEBHOOK_URL_LABEL = "Webhook URL:"
+    WEBHOOK_URL_PLACEHOLDER = "https://hooks.slack.com/services/... or Teams Webhook URL"
+    WEBHOOK_NOTIFY_ON = "Notify when:"
+    WEBHOOK_NOTIFY_ALWAYS = "Always (All runs)"
+    WEBHOOK_NOTIFY_FAILURE_ONLY = "On Failure / Interruption only"
+    WEBHOOK_TEST_BTN = "🔔 Send Test Notification"
+    WEBHOOK_TEST_SUCCESS = "Test notification sent successfully!"
+    WEBHOOK_TEST_FAIL = "Failed to send test notification:\n{error}"
+    WEBHOOK_URL_EMPTY = "Please enter a Webhook URL first."
 
     # Row Context Menu
     RETRY_ROW = "Retry this row"
@@ -785,10 +812,17 @@ _KO_STRINGS: dict[str, str] = {
     "BTN_ADD_WIN": "🪟 + 창정렬",
     "MOVE_UP": "↑ 위로",
     "MOVE_DOWN": "↓ 아래로",
+    "COPY": "복사",
+    "CUT": "잘라내기",
+    "PASTE": "붙여넣기",
     "DUPLICATE": "복제",
     "DELETE": "삭제",
     "GROUP": "그룹화",
     "UNGROUP": "그룹 해제",
+    "COPIED_N_STEPS": "{count}개 단계 복사됨",
+    "CUT_N_STEPS": "{count}개 단계 잘라냄",
+    "PASTED_N_STEPS": "{count}개 단계 붙여넣음",
+    "DELETED_N_STEPS": "{count}개 단계 삭제됨",
     "SEARCH_ACTIONS": "동작 검색...",
     "FILTER_ALL": "모든 동작",
     "FILTER_GUARD_VERIFY_ONLY": "Guard/Verify 포함만",
@@ -898,6 +932,24 @@ _KO_STRINGS: dict[str, str] = {
     "STATUS_FAILED": "실패",
     "STATUS_INTERRUPTED": "중단됨",
     "STATUS_SKIPPED": "건너뜀",
+    "EXPORT_RESULTS": "결과 내보내기 (.xlsx)",
+    "EXPORT_SUCCESS_TITLE": "결과 내보내기 완료",
+    "EXPORT_SUCCESS_MSG": "실행 결과가 다음 파일로 저장되었습니다:\n{path}",
+    "EXPORT_ERROR_TITLE": "결과 내보내기 오류",
+    "EXPORT_ERROR_MSG": "실행 결과를 내보내는 중 오류가 발생했습니다:\n{error}",
+    "EXPORT_NO_DATA": "내보낼 데이터가 없습니다.",
+    "WEBHOOK_SETTINGS_TAB": "웹훅 알림",
+    "WEBHOOK_GROUP": "작업 완료 웹훅 알림 (Slack / Teams)",
+    "WEBHOOK_ENABLE": "작업 완료 시 웹훅 알림 전송",
+    "WEBHOOK_URL_LABEL": "웹훅 URL:",
+    "WEBHOOK_URL_PLACEHOLDER": "Slack 웹훅 URL 또는 Teams 웹훅 URL을 입력하세요",
+    "WEBHOOK_NOTIFY_ON": "알림 조건:",
+    "WEBHOOK_NOTIFY_ALWAYS": "항상 전송 (성공 및 실패)",
+    "WEBHOOK_NOTIFY_FAILURE_ONLY": "오류/중단 발생 시에만 전송",
+    "WEBHOOK_TEST_BTN": "🔔 테스트 알림 전송",
+    "WEBHOOK_TEST_SUCCESS": "테스트 알림이 성공적으로 전송되었습니다!",
+    "WEBHOOK_TEST_FAIL": "테스트 알림 전송 실패:\n{error}",
+    "WEBHOOK_URL_EMPTY": "웹훅 URL을 먼저 입력해 주세요.",
     "RETRY_ROW": "이 행 다시 실행 대기(Pending)",
     "SKIP_ROW": "이 행 건너뛰기(Skip)",
     "MARK_DONE": "완료(Done)로 표시",

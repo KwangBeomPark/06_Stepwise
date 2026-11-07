@@ -2,7 +2,7 @@
 ; Standard Per-User installer for PL Suite applications (App01 ~ App10).
 
 #ifndef MyAppVersion
-#define MyAppVersion "0.4.2"
+#define MyAppVersion "0.5.0"
 #endif
 
 #define MyAppName "Stepwise"

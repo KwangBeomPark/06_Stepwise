@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable
+from datetime import datetime
 
 from PySide6.QtCore import QPoint, Qt, Signal
 from PySide6.QtGui import QColor, QDragEnterEvent, QDropEvent
@@ -32,7 +33,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from stepwise.services.data_source import read_data_file
+from stepwise.services.data_source import export_execution_results_xlsx, read_data_file
 from stepwise.ui.strings import Strings, format_status_display, normalize_status_code
 from stepwise.ui.theme import get_theme_tokens
 
@@ -53,6 +54,8 @@ class DataPanel(QWidget):
         self._row_numbers: list[int] = []
         # Stores canonical status code ('Pending', 'Done', 'Failed', 'Running', 'Interrupted', 'Skipped')
         self._row_statuses: dict[int, str] = {}
+        # Stores detail metadata per row: {"timestamp": "...", "reason": "..."}
+        self._row_details: dict[int, dict[str, str]] = {}
         self._reconnect_path: str | None = None
         self._running = False
         # Optional hook run before the file dialog opens (e.g. to cancel pending input).
@@ -71,10 +74,15 @@ class DataPanel(QWidget):
         self.btn_reconnect = QPushButton()
         self.btn_reconnect.clicked.connect(self._on_reconnect_clicked)
         self.btn_reconnect.hide()
+        self.btn_export = QPushButton(f"📊 {Strings.EXPORT_RESULTS}")
+        self.btn_export.setToolTip(Strings.EXPORT_RESULTS)
+        self.btn_export.setEnabled(False)
+        self.btn_export.clicked.connect(self._on_export_clicked)
         self.lbl_info = QLabel(Strings.NO_DATA)
 
         top_layout.addWidget(self.btn_select_file)
         top_layout.addWidget(self.btn_reconnect)
+        top_layout.addWidget(self.btn_export)
         top_layout.addWidget(self.lbl_info)
         top_layout.addStretch()
         layout.addLayout(top_layout)
@@ -121,6 +129,8 @@ class DataPanel(QWidget):
         """Update labels, chips, and table status strings on language/theme switch."""
         self.btn_select_file.setText(Strings.SELECT_DATA_FILE)
         self.btn_select_file.setToolTip(Strings.Tooltips.CHOOSE_DATA_FILE)
+        self.btn_export.setText(f"📊 {Strings.EXPORT_RESULTS}")
+        self.btn_export.setToolTip(Strings.EXPORT_RESULTS)
         self.lbl_chips_title.setText(Strings.INSERT_VARIABLE_LABEL)
         self.lbl_empty.setText(Strings.DATA_DROP_HINT)
         self._apply_theme_styles()
@@ -182,6 +192,8 @@ class DataPanel(QWidget):
         self._rows = rows
         self._row_numbers = row_nums
         self._row_statuses.clear()
+        self._row_details.clear()
+        self.btn_export.setEnabled(len(rows) > 0)
 
         self._rebuild_table()
         self._rebuild_chips()
@@ -321,10 +333,26 @@ class DataPanel(QWidget):
         """Return shallow copy of all tracked row statuses."""
         return dict(self._row_statuses)
 
-    def update_row_status(self, row_number: int, status: str) -> None:
+    def update_row_status(
+        self,
+        row_number: int,
+        status: str,
+        reason: str = "",
+        timestamp: str = "",
+    ) -> None:
         """Update live status for a row using canonical status code while showing localized text."""
         canonical = normalize_status_code(status)
         self._row_statuses[row_number] = canonical
+
+        # Record completion timestamp and failure reason when row reaches terminal or execution state
+        if canonical in ("Done", "Failed", "Interrupted", "Skipped") or reason or timestamp:
+            dt = self._row_details.setdefault(row_number, {})
+            dt["timestamp"] = timestamp or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            if reason:
+                dt["reason"] = reason
+            elif canonical == "Done":
+                dt["reason"] = ""
+
         display_text = format_status_display(canonical)
         for idx, r_num in enumerate(self._row_numbers):
             if r_num == row_number:
@@ -334,6 +362,23 @@ class DataPanel(QWidget):
                     item.setData(Qt.ItemDataRole.UserRole, canonical)
                     self._apply_status_style(item, canonical)
                 break
+
+    def record_row_detail(
+        self,
+        row_number: int,
+        reason: str = "",
+        timestamp: str = "",
+    ) -> None:
+        """Record or update execution detail metadata (e.g. error message) for a row."""
+        dt = self._row_details.setdefault(row_number, {})
+        if timestamp:
+            dt["timestamp"] = timestamp
+        if reason:
+            dt["reason"] = reason
+
+    def get_row_details(self) -> dict[int, dict[str, str]]:
+        """Return shallow copy of all tracked row detail metadata."""
+        return {k: dict(v) for k, v in self._row_details.items()}
 
     def _apply_status_style(self, item: QTableWidgetItem, status: str) -> None:
         t = get_theme_tokens()
@@ -357,11 +402,60 @@ class DataPanel(QWidget):
     def reset_all_statuses(self) -> None:
         """Reset all row statuses back to blank / Pending."""
         self._row_statuses.clear()
+        self._row_details.clear()
         for idx in range(len(self._row_numbers)):
             item = self.table.item(idx, 1)
             if item:
                 item.setText("")
                 item.setData(Qt.ItemDataRole.UserRole, "Pending")
+
+    def export_results(self, output_filepath: str | None = None) -> str:
+        """Export current execution results to a new Excel file. Returns saved path."""
+        if not self._rows:
+            return ""
+        return export_execution_results_xlsx(
+            headers=self._headers,
+            rows=self._rows,
+            row_numbers=self._row_numbers,
+            row_statuses=self._row_statuses,
+            source_filepath=self._current_filepath,
+            output_filepath=output_filepath,
+            row_details=self._row_details,
+        )
+
+    def _on_export_clicked(self) -> None:
+        if not self._rows:
+            QMessageBox.information(self, Strings.EXPORT_RESULTS, Strings.EXPORT_NO_DATA)
+            return
+
+        source_stem = os.path.splitext(os.path.basename(self._current_filepath or "data"))[0]
+        now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+        default_filename = f"{source_stem}_결과_{now_str}.xlsx"
+        base_dir = os.path.dirname(self._current_filepath) if self._current_filepath else ""
+        default_path = os.path.join(base_dir, default_filename) if base_dir else default_filename
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            Strings.EXPORT_RESULTS,
+            default_path,
+            "Excel Files (*.xlsx);;All Files (*)",
+        )
+        if not file_path:
+            return
+
+        try:
+            saved_path = self.export_results(output_filepath=file_path)
+            QMessageBox.information(
+                self,
+                Strings.EXPORT_SUCCESS_TITLE,
+                Strings.EXPORT_SUCCESS_MSG.format(path=saved_path),
+            )
+        except Exception as e:
+            QMessageBox.warning(
+                self,
+                Strings.EXPORT_ERROR_TITLE,
+                Strings.EXPORT_ERROR_MSG.format(error=e),
+            )
 
     def _show_context_menu(self, pos: QPoint) -> None:
         item = self.table.itemAt(pos)
@@ -378,6 +472,8 @@ class DataPanel(QWidget):
         act_run_only = menu.addAction(Strings.RUN_ONLY_THIS_ROW)
         menu.addSeparator()
         act_reset_all = menu.addAction(Strings.RESET_ALL_STATUSES)
+        menu.addSeparator()
+        act_export = menu.addAction(f"📊 {Strings.EXPORT_RESULTS}")
 
         action = menu.exec(self.table.mapToGlobal(pos))
         if action == act_retry:
@@ -391,6 +487,8 @@ class DataPanel(QWidget):
             self.row_status_override.emit(row_num, "Done")
         elif action == act_run_only:
             self.run_only_row_requested.emit(row_num)
+        elif action == act_export:
+            self._on_export_clicked()
         elif action == act_reset_all:
             reply = QMessageBox.question(
                 self,

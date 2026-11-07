@@ -44,11 +44,11 @@ def collect_referenced_variables(macro: Macro) -> list[str]:
     def _scan(items: list[ActionItem]) -> None:
         for it in items:
             if it.type == "type_text" and it.text:
-                for v in extract_variable_names(it.text):
+                for v in extract_variable_names(it.text, include_builtins=False):
                     if v not in var_names:
                         var_names.append(v)
             elif it.type == "window_set_bounds" and it.window_title:
-                for v in extract_variable_names(it.window_title):
+                for v in extract_variable_names(it.window_title, include_builtins=False):
                     if v not in var_names:
                         var_names.append(v)
             elif (
@@ -60,7 +60,7 @@ def collect_referenced_variables(macro: Macro) -> list[str]:
             ):
                 for key in ("window_title", "name"):
                     raw_val = str(it.selector.get(key) or "")
-                    for v in extract_variable_names(raw_val):
+                    for v in extract_variable_names(raw_val, include_builtins=False):
                         if v not in var_names:
                             var_names.append(v)
             elif it.type == "group" and it.items:
@@ -87,7 +87,7 @@ def find_unknown_text_variables(macro: Macro, columns: Sequence[str]) -> list[Pr
             step_no += 1
             if it.type != "type_text" or not (enabled and it.enabled) or not it.text:
                 continue
-            for var in extract_variable_names(it.text):
+            for var in extract_variable_names(it.text, include_builtins=False):
                 if var in available:
                     continue
                 close = difflib.get_close_matches(var, available, n=1, cutoff=0.6)

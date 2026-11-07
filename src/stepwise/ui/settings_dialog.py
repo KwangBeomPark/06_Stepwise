@@ -33,6 +33,7 @@ from stepwise.core.app_paths import (
     user_settings_directory,
 )
 from stepwise.services.jiggler import safe_jiggler_interval
+from stepwise.services.notifier import send_test_webhook
 from stepwise.ui.strings import Strings, apply_language, get_current_language
 from stepwise.ui.theme import apply_theme, get_current_theme
 
@@ -161,7 +162,43 @@ class SettingsDialog(QDialog):
 
         self.tabs.addTab(tab_timing, "Timing & Image")
 
-        # Tab 4: About
+        # Tab 4: Notifications (Slack / Teams Webhook)
+        tab_notify = QWidget()
+        layout_notify = QVBoxLayout(tab_notify)
+        layout_notify.setSpacing(10)
+
+        box_webhook = QGroupBox(Strings.WEBHOOK_GROUP)
+        layout_webhook = QFormLayout(box_webhook)
+        layout_webhook.setSpacing(8)
+
+        self.chk_webhook_enable = QCheckBox(Strings.WEBHOOK_ENABLE)
+        self.chk_webhook_enable.setChecked(bool(self._settings.get("webhook_enabled", False)))
+        layout_webhook.addRow(self.chk_webhook_enable)
+
+        self.txt_webhook_url = QLineEdit(str(self._settings.get("webhook_url", "")))
+        self.txt_webhook_url.setPlaceholderText(Strings.WEBHOOK_URL_PLACEHOLDER)
+        layout_webhook.addRow(Strings.WEBHOOK_URL_LABEL, self.txt_webhook_url)
+
+        self.cmb_webhook_condition = QComboBox()
+        self.cmb_webhook_condition.addItem(Strings.WEBHOOK_NOTIFY_ALWAYS, "always")
+        self.cmb_webhook_condition.addItem(Strings.WEBHOOK_NOTIFY_FAILURE_ONLY, "failure_only")
+        cur_cond = str(self._settings.get("webhook_condition", "always"))
+        self.cmb_webhook_condition.setCurrentIndex(1 if cur_cond == "failure_only" else 0)
+        layout_webhook.addRow(Strings.WEBHOOK_NOTIFY_ON, self.cmb_webhook_condition)
+
+        h_test = QHBoxLayout()
+        self.btn_test_webhook = QPushButton(Strings.WEBHOOK_TEST_BTN)
+        self.btn_test_webhook.clicked.connect(self._on_test_webhook_clicked)
+        h_test.addWidget(self.btn_test_webhook)
+        h_test.addStretch()
+        layout_webhook.addRow("", h_test)
+
+        layout_notify.addWidget(box_webhook)
+        layout_notify.addStretch()
+
+        self.tabs.addTab(tab_notify, Strings.WEBHOOK_SETTINGS_TAB)
+
+        # Tab 5: About
         tab_about = QWidget()
         layout_about = QVBoxLayout(tab_about)
         layout_about.setSpacing(10)
@@ -276,6 +313,24 @@ class SettingsDialog(QDialog):
         finally:
             self.btn_check_now.setEnabled(True)
 
+    def _on_test_webhook_clicked(self) -> None:
+        url = self.txt_webhook_url.text().strip()
+        if not url:
+            QMessageBox.warning(self, Strings.WEBHOOK_GROUP, Strings.WEBHOOK_URL_EMPTY)
+            return
+
+        self.btn_test_webhook.setEnabled(False)
+        try:
+            ok, msg = send_test_webhook(url)
+            if ok:
+                QMessageBox.information(self, Strings.WEBHOOK_GROUP, Strings.WEBHOOK_TEST_SUCCESS)
+            else:
+                QMessageBox.warning(
+                    self, Strings.WEBHOOK_GROUP, Strings.WEBHOOK_TEST_FAIL.format(error=msg)
+                )
+        finally:
+            self.btn_test_webhook.setEnabled(True)
+
     def _open_user_settings(self) -> None:
         u_dir = str(user_settings_directory())
         try:
@@ -302,6 +357,9 @@ class SettingsDialog(QDialog):
         candidate["auto_check_updates"] = bool(self.chk_auto_update.isChecked())
         candidate["anti_lock_jiggler_enabled"] = bool(self.chk_jiggler.isChecked())
         candidate["anti_lock_jiggler_interval_sec"] = self.spin_jiggler_interval.value()
+        candidate["webhook_enabled"] = bool(self.chk_webhook_enable.isChecked())
+        candidate["webhook_url"] = self.txt_webhook_url.text().strip()
+        candidate["webhook_condition"] = str(self.cmb_webhook_condition.currentData() or "always")
         try:
             save_user_settings(candidate)
         except OSError:

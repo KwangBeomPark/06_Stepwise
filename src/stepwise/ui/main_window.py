@@ -16,6 +16,7 @@ import copy
 import json
 import logging
 import os
+import re
 import tempfile
 import threading
 import uuid
@@ -122,6 +123,7 @@ class MainWindow(QMainWindow):
         self._row_status_overrides: dict[int, str] = {}
         self._run_total_rows = 0
         self._run_row_index = 0
+        self._run_current_row: int | None = None
 
         self._controller: ExecutionController | None = None
         self._hotkey_mgr: GlobalHotkeyManager | None = None
@@ -134,6 +136,7 @@ class MainWindow(QMainWindow):
         self._close_requested = False
         self._last_run_opts: dict[str, Any] = {}
         self._saved_snapshot = self._macro_snapshot_json()
+        self._action_clipboard: list[dict[str, Any]] = []
 
         # "Test this step" countdown so the click/typing does not land on Stepwise itself
         self._step_test_pending = False
@@ -274,7 +277,11 @@ class MainWindow(QMainWindow):
         self.action_tree.request_add_action.connect(self._on_request_add_action)
         self.action_tree.request_move_section.connect(self._on_request_move_section)
         self.action_tree.request_delete_action.connect(self._on_request_delete_action)
+        self.action_tree.request_delete_actions.connect(self._on_request_delete_actions)
         self.action_tree.request_duplicate_action.connect(self._on_request_duplicate_action)
+        self.action_tree.request_copy_actions.connect(self._on_request_copy_actions)
+        self.action_tree.request_cut_actions.connect(self._on_request_cut_actions)
+        self.action_tree.request_paste_actions.connect(self._on_request_paste_actions)
         self.action_tree.request_move_up.connect(self._on_request_move_up)
         self.action_tree.request_move_down.connect(self._on_request_move_down)
         self.action_tree.macro_modified.connect(self._update_window_title)
@@ -662,34 +669,96 @@ class MainWindow(QMainWindow):
         self._update_window_title()
         self.status_bar.showMessage(f"Moved step to {target_section.upper()}")
 
-    def _on_request_delete_action(self, action: ActionItem) -> None:
-        self._cancel_step_test()
-        location = self._current_macro.find_action_location(action)
-        if location is None:
+    def _renew_action_ids(self, item: ActionItem) -> None:
+        item.id = str(uuid.uuid4())
+        for child in item.items:
+            self._renew_action_ids(child)
+
+    def _on_request_copy_actions(self, actions: list[ActionItem]) -> None:
+        if not actions:
             return
-        location.items.pop(location.index)
-        if location.items:
-            next_select_id = location.items[min(location.index, len(location.items) - 1)].id
-        elif location.parent is not None:
-            next_select_id = f"empty_group_{location.parent.id}"
+        self._action_clipboard = [copy.deepcopy(act.to_dict()) for act in actions]
+        self.status_bar.showMessage(Strings.COPIED_N_STEPS.format(count=len(actions)))
+
+    def _on_request_cut_actions(self, actions: list[ActionItem]) -> None:
+        if not actions:
+            return
+        self._action_clipboard = [copy.deepcopy(act.to_dict()) for act in actions]
+        self._on_request_delete_actions(actions)
+        self.status_bar.showMessage(Strings.CUT_N_STEPS.format(count=len(actions)))
+
+    def _on_request_paste_actions(self) -> None:
+        if not self._action_clipboard:
+            return
+        self._cancel_step_test()
+        sec_name, parent, ins_idx = self.action_tree.get_current_insertion_target()
+
+        new_actions: list[ActionItem] = []
+        for d in self._action_clipboard:
+            act = ActionItem.from_dict(copy.deepcopy(d))
+            self._renew_action_ids(act)
+            new_actions.append(act)
+
+        if parent is not None:
+            target_list = parent.items
         else:
-            next_select_id = f"empty_{location.section}"
+            target_list = getattr(self._current_macro, sec_name)
+
+        ins_idx = max(0, min(ins_idx, len(target_list)))
+        for i, act in enumerate(new_actions):
+            target_list.insert(ins_idx + i, act)
+
+        pasted_ids = [act.id for act in new_actions]
+        self.action_tree.rebuild_tree(select_id=pasted_ids)
+        self._update_window_title()
+        self.status_bar.showMessage(Strings.PASTED_N_STEPS.format(count=len(new_actions)))
+
+    def _on_request_delete_actions(self, actions: list[ActionItem]) -> None:
+        if not actions:
+            return
+        self._cancel_step_test()
+
+        locations = []
+        for act in actions:
+            loc = self._current_macro.find_action_location(act)
+            if loc is not None:
+                locations.append(loc)
+
+        if not locations:
+            return
+
+        by_list_id: dict[int, list[tuple[int, list[ActionItem]]]] = {}
+        for loc in locations:
+            list_id = id(loc.items)
+            by_list_id.setdefault(list_id, []).append((loc.index, loc.items))
+
+        for items_list in by_list_id.values():
+            items_list.sort(key=lambda pair: pair[0], reverse=True)
+            for idx, target_list in items_list:
+                if 0 <= idx < len(target_list):
+                    target_list.pop(idx)
+
+        last_loc = locations[-1]
+        if last_loc.items:
+            next_select_id = last_loc.items[min(last_loc.index, len(last_loc.items) - 1)].id
+        elif last_loc.parent is not None:
+            next_select_id = f"empty_group_{last_loc.parent.id}"
+        else:
+            next_select_id = f"empty_{last_loc.section}"
+
         self.action_tree.rebuild_tree(select_id=next_select_id)
         self._update_window_title()
-        self.status_bar.showMessage("Deleted step")
+        self.status_bar.showMessage(Strings.DELETED_N_STEPS.format(count=len(locations)))
+
+    def _on_request_delete_action(self, action: ActionItem) -> None:
+        self._on_request_delete_actions([action])
 
     def _on_request_duplicate_action(self, action: ActionItem) -> None:
         location = self._current_macro.find_action_location(action)
         if location is None:
             return
         new_act = copy.deepcopy(action)
-
-        def renew_ids(item: ActionItem) -> None:
-            item.id = str(uuid.uuid4())
-            for child in item.items:
-                renew_ids(child)
-
-        renew_ids(new_act)
+        self._renew_action_ids(new_act)
         location.items.insert(location.index + 1, new_act)
         self.action_tree.rebuild_tree(select_id=new_act.id)
         self._update_window_title()
@@ -869,12 +938,11 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Image Match Test", f"Error during image matching:\n{e}")
 
     def _on_delete_action(self) -> None:
-        selected = self.action_tree.tree.selectedItems()
-        if not selected:
-            return
-        data = selected[0].data(0, Qt.ItemDataRole.UserRole)
-        if isinstance(data, ActionItem):
-            self._on_request_delete_action(data)
+        acts = self.action_tree._get_selected_actions()
+        if len(acts) > 1:
+            self._on_request_delete_actions(acts)
+        elif len(acts) == 1:
+            self._on_request_delete_action(acts[0])
 
     def _on_data_loaded(
         self,
@@ -1547,7 +1615,13 @@ class MainWindow(QMainWindow):
             return
         summary = self._pending_summary
         self._teardown_runner()
+        webhook_thread: threading.Thread | None = None
+        if summary:
+            # Trigger asynchronous webhook notification before potential close
+            webhook_thread = self._dispatch_run_webhook(summary)
         if self._close_requested and not (summary and summary.persistence_errors):
+            if webhook_thread and webhook_thread.is_alive():
+                webhook_thread.join(timeout=3.0)
             self.close()
             return
         self._close_requested = False
@@ -1569,6 +1643,58 @@ class MainWindow(QMainWindow):
             dlg.jump_to_step_requested.connect(self._jump_to_step)
             dlg.retry_failed_requested.connect(self._retry_failed_rows)
             dlg.exec()
+
+    def _dispatch_run_webhook(self, summary: RunSummary) -> threading.Thread | None:
+        try:
+            settings = load_user_settings()
+            if not settings.get("webhook_enabled"):
+                return None
+            webhook_url = str(settings.get("webhook_url", "")).strip()
+            if not webhook_url:
+                return None
+
+            condition = str(settings.get("webhook_condition", "always"))
+            macro_name = self._current_macro.name if self._current_macro else "Untitled Macro"
+
+            if summary.interrupted:
+                status = "Interrupted"
+            elif summary.failed_row_numbers or summary.failure is not None or summary.failed_count > 0:
+                status = "Failed"
+            else:
+                status = "Done"
+
+            failed_rows = list(summary.failed_row_numbers) if summary.failed_row_numbers else []
+            if not failed_rows and summary.failure and getattr(summary.failure, "row_number", None) is not None:
+                failed_rows.append(summary.failure.row_number)
+
+            # Sanitize error details to ensure no sensitive spreadsheet cell content is leaked.
+            error_details = {}
+            for k, v in self.data_panel.get_row_details().items():
+                reason = v.get("reason", "")
+                if reason:
+                    first_line = reason.split("\n")[0]
+                    # Mask both single and double-quoted parameters/titles to prevent data leakage
+                    clean_reason = re.sub(r"['\"][^'\"]*['\"]", "'***'", first_line)
+                    error_details[k] = clean_reason[:80]
+
+            from stepwise.services.notifier import send_run_summary_webhook_async
+
+            t = send_run_summary_webhook_async(
+                webhook_url=webhook_url,
+                condition=condition,
+                macro_name=macro_name,
+                status=status,
+                duration_sec=summary.duration_sec,
+                total_rows=summary.total_rows,
+                done_rows=summary.done_count,
+                failed_rows=failed_rows,
+                error_details=error_details,
+            )
+            self._webhook_thread = t
+            return t
+        except Exception as e:
+            logger.error("Failed to trigger webhook notification: %s", e)
+            return None
 
     def _retry_failed_rows(self, failed_row_numbers: list[int] | None = None) -> None:
         if failed_row_numbers is None:
@@ -1664,6 +1790,7 @@ class MainWindow(QMainWindow):
         self.floating_panel.update_progress(0, total_rows, Strings.RUN_PANEL_STARTING, 0, 0)
 
     def _on_engine_row_started(self, row_num: int, row_data: dict) -> None:
+        self._run_current_row = row_num
         self._run_row_index += 1
         tot = max(1, self._run_total_rows)
         self.floating_panel.update_progress(
@@ -1679,7 +1806,13 @@ class MainWindow(QMainWindow):
         pass
 
     def _on_engine_row_finished(self, row_num: int, status: str) -> None:
-        self.data_panel.update_row_status(row_num, status)
+        from datetime import datetime
+
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.data_panel.update_row_status(row_num, status, timestamp=ts)
+        self.data_panel.record_row_detail(row_num, timestamp=ts)
+        if self._run_current_row == row_num:
+            self._run_current_row = None
 
     def _on_engine_run_finished(self, summary: RunSummary) -> None:
         self._pending_summary = summary
@@ -1690,6 +1823,12 @@ class MainWindow(QMainWindow):
     def _on_engine_run_failed(self, failure: StepFailure, screenshot_path: str | None) -> None:
         if failure.step_id:
             self.action_tree.highlight_step(failure.step_id, is_running=False, is_failed=True)
+        target_row = getattr(failure, "row_number", None)
+        if target_row is None:
+            target_row = self._run_current_row
+        if target_row is not None:
+            err_msg = failure.message or str(getattr(failure, "error", "") or getattr(failure, "failure_type", "") or "")
+            self.data_panel.record_row_detail(target_row, reason=err_msg)
 
     def _teardown_runner(self) -> None:
         hotkey_mgr = self._hotkey_mgr
@@ -1745,6 +1884,9 @@ class MainWindow(QMainWindow):
         if hasattr(self, "overlay"):
             self.overlay.close()
         self.floating_panel.close()
+        # Ensure any pending webhook notification finishes before process terminates
+        if getattr(self, "_webhook_thread", None) and self._webhook_thread.is_alive():
+            self._webhook_thread.join(timeout=3.0)
         if self._package_temp:
             self._package_temp.cleanup()
             self._package_temp = None
