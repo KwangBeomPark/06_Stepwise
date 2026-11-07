@@ -392,5 +392,13 @@ class DataPanel(QWidget):
         elif action == act_run_only:
             self.run_only_row_requested.emit(row_num)
         elif action == act_reset_all:
-            self.reset_all_statuses()
-            self.row_status_override.emit(-1, "ResetAll")
+            reply = QMessageBox.question(
+                self,
+                Strings.RESET_ALL_STATUSES_CONFIRM_TITLE,
+                Strings.RESET_ALL_STATUSES_CONFIRM_MSG,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self.reset_all_statuses()
+                self.row_status_override.emit(-1, "ResetAll")

@@ -275,6 +275,7 @@ class Strings:
     SCHEDULER_STOP_QUEUE = "Stop immediately and save failure screenshot (Fail-Fast)"
     SCHEDULER_CONTINUE_NEXT = "Stop immediately (Fail-Fast)"
     SCHEDULER_LOCK_AFTER = "Lock Windows screen (LockWorkStation) after scheduled completion"
+    SCHEDULER_RESET_STATUSES = "Reset completed rows back to Pending before execution"
     SCHEDULER_ANTI_LOCK_JIGGLER = "Hold Anti-Lock Jiggler while armed (prevents sleep & lock)"
     SCHEDULER_ANTI_LOCK_JIGGLER_TIP = "Sends an unassigned virtual key pulse every {seconds}s while waiting for scheduled launch to prevent Corporate GPO inactivity lock."
     SETTINGS_JIGGLER_GROUP = "Screen Lock Prevention (Anti-Lock Jiggler)"
@@ -931,6 +932,7 @@ _KO_STRINGS: dict[str, str] = {
     "SCHEDULER_STOP_QUEUE": "즉시 중단 및 실패 스크린샷 기록 (Fail-Fast 안전 우선)",
     "SCHEDULER_CONTINUE_NEXT": "즉시 중단 (Fail-Fast)",
     "SCHEDULER_LOCK_AFTER": "예약 실행 정상 완료 후 Windows 화면 잠금(LockWorkStation)",
+    "SCHEDULER_RESET_STATUSES": "실행 전 완료(Done)된 행을 '대기(Pending)'로 자동 초기화",
     "SCHEDULER_ANTI_LOCK_JIGGLER": "예약 대기 중 화면 잠금 방지 (Anti-Lock Jiggler)",
     "SCHEDULER_ANTI_LOCK_JIGGLER_TIP": "예약 시각까지 대기하는 동안 {seconds}초마다 보이지 않는 무영향 신호를 전송하여 사내 보안 잠금으로 화면이 꺼지는 것을 방지합니다.",
     "SETTINGS_JIGGLER_GROUP": "화면 자동 잠금 방지 (Anti-Lock Jiggler)",

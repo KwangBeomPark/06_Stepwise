@@ -1105,3 +1105,38 @@ def test_scheduled_execution_hotkey_failure_no_modal(qapp: QApplication):
         win._start_execution(opts)
         assert mock_warn.call_count == 0
         assert Strings.F12_ERROR.split("{")[0] in win.status_bar.currentMessage()
+
+
+def test_whitespace_headers_default_to_column_name():
+    """Header cells containing only whitespace must default to Column_N instead of empty string."""
+    headers = validate_and_build_headers(["   ", "\t", "Valid"])
+    assert headers == ["Column_1", "Column_2", "Valid"]
+
+
+def test_scheduler_dialog_all_done_with_reset_checkbox(qapp: QApplication):
+    """Scheduler blocks if all rows are Done and reset_before_run is unchecked, passes if checked."""
+    from stepwise.ui.scheduler_dialog import SchedulerDialog
+
+    macro = Macro(name="TestMacro", per_row=[ActionItem(type="wait", seconds=0.01)])
+    rows = [{"val": "1"}, {"val": "2"}]
+    nums = [1, 2]
+    excluded = {1, 2}
+
+    dlg = SchedulerDialog(
+        macro=macro,
+        rows_data=rows,
+        row_numbers=nums,
+        excluded_row_numbers=excluded,
+    )
+    # Default: chk_reset_before_run is checked -> no ALL_ROWS_EXCLUDED error
+    assert not any(d.title == Strings.ISSUE_ALL_ROWS_EXCLUDED for d in dlg.diagnostics)
+
+    # When user unchecks reset_before_run, ALL_ROWS_EXCLUDED blocking error appears
+    dlg.chk_reset_before_run.setChecked(False)
+    assert any(d.title == Strings.ISSUE_ALL_ROWS_EXCLUDED for d in dlg.diagnostics)
+    assert dlg.has_blocking_errors() is True
+
+    # Re-checking clears blocking error
+    dlg.chk_reset_before_run.setChecked(True)
+    assert not any(d.title == Strings.ISSUE_ALL_ROWS_EXCLUDED for d in dlg.diagnostics)
+    dlg.close()

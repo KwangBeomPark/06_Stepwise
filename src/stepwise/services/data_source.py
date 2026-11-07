@@ -42,7 +42,8 @@ def validate_and_build_headers(row_vals: list[str]) -> list[str]:
 
     for i, val in enumerate(row_vals):
         col_letter = col_idx_to_letter(i)
-        name = val.strip() if val else f"Column_{i + 1}"
+        stripped = (val or "").strip()
+        name = stripped or f"Column_{i + 1}"
         headers.append(name)
         norm_key = name.lower()
         seen.setdefault(norm_key, []).append(f"'{name}' ({col_letter}열)")

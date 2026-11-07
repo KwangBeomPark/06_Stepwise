@@ -10,7 +10,7 @@ Allows users on Cloud PCs or workstations to:
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from datetime import datetime, time
 from typing import Any
 
@@ -66,6 +66,8 @@ class SchedulerDialog(QDialog):
         results_dir: str = "results",
         jiggler_enabled: bool = False,
         jiggler_interval: float = 45.0,
+        excluded_row_numbers: Collection[int] | None = None,
+        row_statuses: dict[int, str] | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -75,6 +77,8 @@ class SchedulerDialog(QDialog):
         self.macro = macro
         self.rows_data = rows_data
         self.row_numbers = row_numbers or []
+        self._excluded_row_numbers = frozenset(excluded_row_numbers or ())
+        self._row_statuses = dict(row_statuses or {})
         self.package_dir = package_dir
         self.data_file_path = data_file_path
         self.results_dir = results_dir
@@ -113,6 +117,7 @@ class SchedulerDialog(QDialog):
         self.spin_start_row = QSpinBox()
         self.spin_start_row.setRange(1, max(1, total_rows))
         self.spin_start_row.setValue(1)
+        self.spin_start_row.valueChanged.connect(self._refresh_diagnostics)
         cfg_form.addRow(Strings.SCHEDULER_START_ROW, self.spin_start_row)
 
         self.cmb_speed = QComboBox()
@@ -125,6 +130,11 @@ class SchedulerDialog(QDialog):
         self.cmb_on_fail.addItem(Strings.SCHEDULER_STOP_QUEUE, "stop")
         self.cmb_on_fail.setEnabled(False)
         cfg_form.addRow(Strings.SCHEDULER_ON_FAIL, self.cmb_on_fail)
+
+        self.chk_reset_before_run = QCheckBox(Strings.SCHEDULER_RESET_STATUSES)
+        self.chk_reset_before_run.setChecked(True)
+        self.chk_reset_before_run.toggled.connect(self._refresh_diagnostics)
+        cfg_form.addRow("", self.chk_reset_before_run)
 
         self.chk_lock_after = QCheckBox(Strings.SCHEDULER_LOCK_AFTER)
         self.chk_lock_after.setChecked(False)
@@ -145,15 +155,8 @@ class SchedulerDialog(QDialog):
         diag_layout.addWidget(self.list_diag)
         layout.addWidget(diag_box)
 
-        self.diagnostics: list[ScheduleDiagItem] = run_schedule_pre_arm_diagnostics(
-            macro=macro,
-            rows_data=rows_data,
-            row_numbers=row_numbers,
-            package_dir=package_dir,
-            data_file_path=data_file_path,
-            results_dir=results_dir,
-        )
-        self._populate_diagnostics()
+        self.diagnostics: list[ScheduleDiagItem] = []
+        self._refresh_diagnostics()
 
         # 3. Mandatory Overnight Cloud PC Safety Checklist
         self.chk_box = QGroupBox(Strings.SCHEDULER_CHECKLIST_TITLE)
@@ -204,6 +207,47 @@ class SchedulerDialog(QDialog):
     @property
     def target_datetime(self) -> datetime | None:
         return self._target_dt
+
+    def _refresh_diagnostics(self) -> None:
+        try:
+            diag = list(
+                run_schedule_pre_arm_diagnostics(
+                    macro=self.macro,
+                    rows_data=self.rows_data,
+                    row_numbers=self.row_numbers,
+                    package_dir=self.package_dir,
+                    data_file_path=self.data_file_path,
+                    results_dir=self.results_dir,
+                )
+            )
+        except Exception as exc:
+            diag = [
+                ScheduleDiagItem(level="error", title="Pre-run diagnostic error", detail=str(exc))
+            ]
+
+        start = self.spin_start_row.value()
+        total_rows = len(self.rows_data) if self.rows_data else 0
+        if total_rows > 0:
+            raw_nums = (
+                list(self.row_numbers)[start - 1 :]
+                if self.row_numbers
+                else list(range(start, total_rows + 1))
+            )
+            all_excluded = bool(raw_nums) and all(n in self._excluded_row_numbers for n in raw_nums)
+            if all_excluded and not self.chk_reset_before_run.isChecked():
+                diag.append(
+                    ScheduleDiagItem(
+                        level="error",
+                        title=Strings.ISSUE_ALL_ROWS_EXCLUDED,
+                        detail=Strings.ISSUE_ALL_ROWS_EXCLUDED_DETAILS,
+                    )
+                )
+
+        self.diagnostics = diag
+        if hasattr(self, "list_diag"):
+            self._populate_diagnostics()
+        if hasattr(self, "btn_arm"):
+            self._update_arm_button_state()
 
     def _populate_diagnostics(self) -> None:
         t = get_theme_tokens()
@@ -331,20 +375,7 @@ class SchedulerDialog(QDialog):
                 return
 
             # Re-verify pre-arm diagnostics right before unattended launch
-            try:
-                self.diagnostics = run_schedule_pre_arm_diagnostics(
-                    macro=self.macro,
-                    rows_data=self.rows_data,
-                    row_numbers=self.row_numbers,
-                    package_dir=self.package_dir,
-                    data_file_path=self.data_file_path,
-                    results_dir=self.results_dir,
-                )
-            except Exception as exc:
-                self.diagnostics = [
-                    ScheduleDiagItem(level="error", title="Pre-run diagnostic error", detail=str(exc))
-                ]
-            self._populate_diagnostics()
+            self._refresh_diagnostics()
             if self.has_blocking_errors():
                 self.disarm_schedule()
                 return
@@ -373,6 +404,7 @@ class SchedulerDialog(QDialog):
             "lock_after": bool(is_scheduled and self.chk_lock_after.isChecked()),
             "anti_lock_jiggler": self.chk_anti_lock.isChecked(),
             "jiggler_interval_seconds": self._jiggler_interval,
+            "reset_statuses": bool(self.chk_reset_before_run.isChecked()),
         }
         self.confirmed_opts = opts
         self.schedule_triggered.emit(opts)

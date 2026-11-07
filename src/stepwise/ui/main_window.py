@@ -938,6 +938,10 @@ class MainWindow(QMainWindow):
         return path if isinstance(path, str) and os.path.isfile(path) else None
 
     def _on_row_status_override(self, row_num: int, new_status: str) -> None:
+        if row_num == -1:
+            self._row_status_overrides.clear()
+            self.status_bar.showMessage(Strings.RESET_ALL_STATUSES, 3000)
+            return
         self._row_status_overrides[row_num] = new_status
         self.status_bar.showMessage(f"Row #{row_num} marked as {new_status}")
 
@@ -1219,6 +1223,8 @@ class MainWindow(QMainWindow):
             jiggler_interval=safe_jiggler_interval(
                 self._user_settings.get("anti_lock_jiggler_interval_sec"), default=45.0
             ),
+            excluded_row_numbers=self.data_panel.get_excluded_row_numbers(),
+            row_statuses=self.data_panel.get_row_statuses(),
             parent=self,
         )
         if dlg.exec() == SchedulerDialog.Accepted and dlg.confirmed_opts:
