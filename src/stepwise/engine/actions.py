@@ -15,10 +15,15 @@ from collections.abc import Mapping
 from typing import Any
 
 from stepwise.core.variables import substitute_variables
-from stepwise.engine.errors import StepFailure
+from stepwise.engine.errors import AbortRequested, StepFailure
 from stepwise.engine.timing import ExecutionController, SpeedMode, calculate_action_delay
 from stepwise.services.clipboard import temporary_clipboard_text
-from stepwise.services.input_win import click_at, press_keys, type_unicode_string
+from stepwise.services.input_win import (
+    click_at,
+    press_keys,
+    release_all_modifiers,
+    type_unicode_string,
+)
 from stepwise.services.matcher import poll_until_disappears, poll_until_found
 
 
@@ -270,7 +275,24 @@ def execute_action(
 
         def select_all_if_requested() -> None:
             if select_all:
-                press_keys("ctrl+a")
+                if controller:
+                    ok = press_keys(
+                        "ctrl+a",
+                        wait_fn=controller.wait,
+                        should_stop=controller.is_stopped,
+                    )
+                else:
+                    ok = press_keys("ctrl+a")
+                if not ok:
+                    release_all_modifiers()
+                    if controller and controller.is_stopped():
+                        raise AbortRequested("Execution stopped by user during select all.")
+                    raise StepFailure(
+                        message="Failed to send 'Ctrl+A' select-all keystroke. Check application permissions.",
+                        step_id=step_id,
+                        step_label=step_label,
+                        row_number=row_number,
+                    )
                 if controller:
                     controller.wait(0.04, row_number)
                 else:
@@ -278,7 +300,24 @@ def execute_action(
 
         if mode == "keystrokes":
             select_all_if_requested()
-            type_unicode_string(text_to_type)
+            if controller:
+                ok = type_unicode_string(
+                    text_to_type,
+                    wait_fn=controller.wait,
+                    should_stop=controller.is_stopped,
+                )
+            else:
+                ok = type_unicode_string(text_to_type)
+            if not ok:
+                release_all_modifiers()
+                if controller and controller.is_stopped():
+                    raise AbortRequested("Execution stopped by user during typing.")
+                raise StepFailure(
+                    message="Failed to type unicode text. Target application may be unresponsive or running with elevated permissions.",
+                    step_id=step_id,
+                    step_label=step_label,
+                    row_number=row_number,
+                )
         else:
             with temporary_clipboard_text(text_to_type, restore=True) as written:
                 if not written:
@@ -289,7 +328,24 @@ def execute_action(
                         row_number=row_number,
                     )
                 select_all_if_requested()
-                press_keys("ctrl+v")
+                if controller:
+                    ok = press_keys(
+                        "ctrl+v",
+                        wait_fn=controller.wait,
+                        should_stop=controller.is_stopped,
+                    )
+                else:
+                    ok = press_keys("ctrl+v")
+                if not ok:
+                    release_all_modifiers()
+                    if controller and controller.is_stopped():
+                        raise AbortRequested("Execution stopped by user during paste.")
+                    raise StepFailure(
+                        message="Failed to send 'Ctrl+V' paste keystroke. Target application may be blocked by UIPI or running as Administrator.",
+                        step_id=step_id,
+                        step_label=step_label,
+                        row_number=row_number,
+                    )
                 if controller:
                     controller.wait(0.05, row_number)
                 else:
@@ -297,8 +353,26 @@ def execute_action(
 
     elif act_type == "key":
         keys_str = str(_get_val(action, "keys", ""))
-        repeat = int(_get_val(action, "repeat", 1))
-        press_keys(keys_str, repeat=repeat)
+        repeat = max(1, int(_get_val(action, "repeat", 1)))
+        if controller:
+            ok = press_keys(
+                keys_str,
+                repeat=repeat,
+                wait_fn=controller.wait,
+                should_stop=controller.is_stopped,
+            )
+        else:
+            ok = press_keys(keys_str, repeat=repeat)
+        if not ok:
+            release_all_modifiers()
+            if controller and controller.is_stopped():
+                raise AbortRequested("Execution stopped by user during key action.")
+            raise StepFailure(
+                message=f"Failed to send key combination '{keys_str}'. Target window may be unresponsive or running as Administrator.",
+                step_id=step_id,
+                step_label=step_label,
+                row_number=row_number,
+            )
 
     elif act_type == "wait":
         secs = float(_get_val(action, "seconds", 1.0))

@@ -7,8 +7,9 @@ Fully supports 64-bit Windows alignment, multi-key shortcuts, and Unicode keystr
 from __future__ import annotations
 
 import ctypes
+import struct
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from ctypes import wintypes
 
 user32 = ctypes.windll.user32
@@ -234,8 +235,45 @@ def parse_key_combination(keys_str: str) -> list[int]:
     return vk_codes
 
 
-def press_keys(keys_str: str, repeat: int = 1, interval: float = 0.05) -> bool:
-    """Press and release a key or key combination.
+def release_all_modifiers() -> bool:
+    """Safely release common modifier keys (Ctrl, Shift, Alt, Win) to prevent stuck keys."""
+    modifiers = [
+        0x11,  # VK_CONTROL
+        0x10,  # VK_SHIFT
+        0x12,  # VK_MENU (Alt)
+        0x5B,  # VK_LWIN
+        0x5C,  # VK_RWIN
+    ]
+    inputs: list[INPUT] = []
+    for vk in modifiers:
+        inp = INPUT(type=INPUT_KEYBOARD)
+        inp.u.ki.wVk = vk
+        inp.u.ki.dwFlags = KEYEVENTF_KEYUP
+        inputs.append(inp)
+    return send_inputs(inputs) == len(inputs)
+
+
+def release_keys(vk_codes: Sequence[int]) -> None:
+    """Send Key-Up for all keys in the combination (in reverse order), followed by release_all_modifiers."""
+    if vk_codes:
+        cleanup_inputs: list[INPUT] = []
+        for vk in reversed(vk_codes):
+            inp = INPUT(type=INPUT_KEYBOARD)
+            inp.u.ki.wVk = vk
+            inp.u.ki.dwFlags = KEYEVENTF_KEYUP
+            cleanup_inputs.append(inp)
+        send_inputs(cleanup_inputs)
+    release_all_modifiers()
+
+
+def press_keys(
+    keys_str: str,
+    repeat: int = 1,
+    interval: float = 0.05,
+    wait_fn: Callable[[float], object] | None = None,
+    should_stop: Callable[[], bool] | None = None,
+) -> bool:
+    """Press and release a key or key combination with atomic verification and cancellation check.
 
     Preserves forward order for down, reverse order for up.
     """
@@ -243,8 +281,11 @@ def press_keys(keys_str: str, repeat: int = 1, interval: float = 0.05) -> bool:
     if not vk_codes:
         return False
 
-    success = True
-    for _ in range(repeat):
+    for i in range(repeat):
+        if should_stop is not None and should_stop():
+            release_keys(vk_codes)
+            return False
+
         inputs: list[INPUT] = []
         # Press down in order
         for vk in vk_codes:
@@ -261,30 +302,95 @@ def press_keys(keys_str: str, repeat: int = 1, interval: float = 0.05) -> bool:
             inputs.append(inp)
 
         sent = send_inputs(inputs)
-        if sent == 0:
-            success = False
-        time.sleep(interval)
+        if sent != len(inputs):
+            release_keys(vk_codes)
+            return False
 
-    return success
+        if i < repeat - 1:
+            if wait_fn is not None:
+                try:
+                    res = wait_fn(interval)
+                    if res is False:
+                        release_keys(vk_codes)
+                        return False
+                except Exception:
+                    release_keys(vk_codes)
+                    return False
+            else:
+                time.sleep(interval)
+
+    return True
 
 
-def type_unicode_string(text: str, char_delay: float = 0.01) -> bool:
-    """Type text character-by-character using KEYEVENTF_UNICODE."""
-    inputs: list[INPUT] = []
-    for char in text:
-        code = ord(char)
-        # Down
-        inp_down = INPUT(type=INPUT_KEYBOARD)
-        inp_down.u.ki.wVk = 0
-        inp_down.u.ki.wScan = code
-        inp_down.u.ki.dwFlags = KEYEVENTF_UNICODE
-        # Up
-        inp_up = INPUT(type=INPUT_KEYBOARD)
-        inp_up.u.ki.wVk = 0
-        inp_up.u.ki.wScan = code
-        inp_up.u.ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP
+def type_unicode_string(
+    text: str,
+    char_delay: float = 0.005,
+    wait_fn: Callable[[float], object] | None = None,
+    should_stop: Callable[[], bool] | None = None,
+) -> bool:
+    """Type text character-by-character using KEYEVENTF_UNICODE with UTF-16 surrogate support."""
+    if not text:
+        return True
 
-        inputs.extend([inp_down, inp_up])
+    # Encode character-by-character to preserve surrogate pair atomicity (e.g. emojis)
+    # A single codepoint may generate 1 or 2 UTF-16 code units (WORDs).
+    char_batches: list[list[INPUT]] = []
+    for ch in text:
+        raw_bytes = ch.encode("utf-16le")
+        num_words = len(raw_bytes) // 2
+        words: tuple[int, ...] = struct.unpack(f"<{num_words}H", raw_bytes)
+        ch_inputs: list[INPUT] = []
+        for code in words:
+            inp_down = INPUT(type=INPUT_KEYBOARD)
+            inp_down.u.ki.wVk = 0
+            inp_down.u.ki.wScan = code
+            inp_down.u.ki.dwFlags = KEYEVENTF_UNICODE
+            inp_up = INPUT(type=INPUT_KEYBOARD)
+            inp_up.u.ki.wVk = 0
+            inp_up.u.ki.wScan = code
+            inp_up.u.ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP
+            ch_inputs.extend([inp_down, inp_up])
+        char_batches.append(ch_inputs)
 
-    sent = send_inputs(inputs)
-    return sent > 0
+    def _cleanup_partial_send(sent_count: int, input_list: list[INPUT]) -> None:
+        """If an odd number of events sent, the last down event has no up; send matching keyup."""
+        if sent_count > 0 and sent_count % 2 == 1:
+            last_down = input_list[sent_count - 1]
+            release_inp = INPUT(type=INPUT_KEYBOARD)
+            release_inp.u.ki.wVk = 0
+            release_inp.u.ki.wScan = last_down.u.ki.wScan
+            release_inp.u.ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP
+            send_inputs([release_inp])
+
+    if char_delay <= 0 and wait_fn is None and should_stop is None:
+        # Fast batch mode: flatten all character inputs
+        all_inputs = [inp for batch in char_batches for inp in batch]
+        sent = send_inputs(all_inputs)
+        if sent != len(all_inputs):
+            _cleanup_partial_send(sent, all_inputs)
+            return False
+        return True
+
+    # Step-by-step mode with inter-character delay and cancellation check
+    # cancellation and delay are checked strictly between full Unicode characters
+    for ch_inputs in char_batches:
+        if should_stop is not None and should_stop():
+            return False
+
+        sent = send_inputs(ch_inputs)
+        if sent != len(ch_inputs):
+            _cleanup_partial_send(sent, ch_inputs)
+            return False
+
+        if char_delay > 0:
+            if wait_fn is not None:
+                try:
+                    res = wait_fn(char_delay)
+                    if res is False:
+                        return False
+                except Exception:
+                    return False
+            else:
+                time.sleep(char_delay)
+
+    return True

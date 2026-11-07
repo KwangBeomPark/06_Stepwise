@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 import os
 import tempfile
 import threading
@@ -65,7 +66,7 @@ from stepwise.ui.run_summary import RunSummaryDialog
 from stepwise.ui.scheduler_dialog import SchedulerDialog
 from stepwise.ui.screen_crosshair import ElementHighlightOverlay, ScreenCrosshairOverlay
 from stepwise.ui.settings_dialog import SettingsDialog
-from stepwise.ui.strings import Strings, apply_language, get_current_language
+from stepwise.ui.strings import Strings, apply_language, get_current_language, normalize_status_code
 from stepwise.ui.theme import apply_theme, get_current_theme, get_theme_tokens
 
 
@@ -92,6 +93,9 @@ class ExecutionSnapshot:
     jiggler_interval_seconds: float = 45.0
 
 
+logger = logging.getLogger(__name__)
+
+
 class MainWindow(QMainWindow):
     def __init__(self, library_dir: str | None = None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -115,6 +119,7 @@ class MainWindow(QMainWindow):
         self._data_headers: list[str] = []
         self._data_rows: list[dict[str, str]] = []
         self._data_row_nums: list[int] = []
+        self._row_status_overrides: dict[int, str] = {}
         self._run_total_rows = 0
         self._run_row_index = 0
 
@@ -885,6 +890,7 @@ class MainWindow(QMainWindow):
         self._data_row_nums = (
             list(row_nums) if row_nums is not None else list(range(1, len(rows) + 1))
         )
+        self._row_status_overrides.clear()
         sample_row = rows[0] if rows else {}
         self.prop_panel.update_variable_completions(headers, sample_row=sample_row)
         self.action_tree.set_data_row_count(len(rows))
@@ -932,21 +938,24 @@ class MainWindow(QMainWindow):
         return path if isinstance(path, str) and os.path.isfile(path) else None
 
     def _on_row_status_override(self, row_num: int, new_status: str) -> None:
+        self._row_status_overrides[row_num] = new_status
         self.status_bar.showMessage(f"Row #{row_num} marked as {new_status}")
 
     def _on_run_only_row(self, row_num: int) -> None:
         if self._is_running:
             return
         try:
-            start_row = self._data_row_nums.index(row_num) + 1
+            row_idx = self._data_row_nums.index(row_num)
         except ValueError:
             self.status_bar.showMessage(
                 f"Cannot run row #{row_num}: row is not in the loaded data."
             )
             return
 
-        opts = {
+        start_row = row_idx + 1
+        opts: dict[str, Any] = {
             "start_row": start_row,
+            "end_row_index": start_row,
             "speed": SpeedMode.NORMAL,
             "skip_setup": False,
             "skip_cleanup": False,
@@ -954,6 +963,9 @@ class MainWindow(QMainWindow):
             "run_1_row": True,
             "countdown_seconds": float(self._user_settings.get("countdown_seconds", 3.0)),
         }
+        if 0 <= row_idx < len(self._data_rows):
+            opts["custom_rows"] = [self._data_rows[row_idx]]
+            opts["custom_row_nums"] = [row_num]
         self._start_execution(opts)
 
     def _update_run_button_text(self) -> None:
@@ -992,8 +1004,10 @@ class MainWindow(QMainWindow):
                 self, Strings.TEST_1_ROW_BLOCKED_TITLE, Strings.TEST_1_ROW_BLOCKED.format(issues=details)
             )
             return
-        opts = {
-            "start_row": row_index + 1,
+        start_row = row_index + 1
+        opts: dict[str, Any] = {
+            "start_row": start_row,
+            "end_row_index": start_row,
             "speed": SpeedMode.NORMAL,
             "skip_setup": False,
             "skip_cleanup": False,
@@ -1001,6 +1015,9 @@ class MainWindow(QMainWindow):
             "run_1_row": True,
             "countdown_seconds": float(self._user_settings.get("countdown_seconds", 3) or 0),
         }
+        if rows and row_nums:
+            opts["custom_rows"] = rows
+            opts["custom_row_nums"] = row_nums
         self._start_execution(opts)
 
     def _insert_variable_into_current_action(self, col_name: str) -> None:
@@ -1223,6 +1240,7 @@ class MainWindow(QMainWindow):
                     QTimer.singleShot(0, self.close)
 
     def _show_preflight(self) -> None:
+        excluded_rows = self.data_panel.get_excluded_row_numbers()
         dlg = PreflightDialog(
             macro=self._current_macro,
             rows_data=self._data_rows,
@@ -1232,6 +1250,9 @@ class MainWindow(QMainWindow):
             data_file_path=self._data_filepath,
             results_dir=str(self._user_settings.get("results_dir") or default_results_directory()),
             countdown_seconds=self._user_settings.get("countdown_seconds", 3),
+            excluded_row_numbers=excluded_rows,
+            excluded_count=len(excluded_rows),
+            row_statuses=self.data_panel.get_row_statuses(),
             parent=self,
         )
         if dlg.exec() != PreflightDialog.Accepted:
@@ -1257,12 +1278,21 @@ class MainWindow(QMainWindow):
         # The modal preflight owns the guard until it has fully closed.
         self._is_running = False
         self._execution_phase = "idle"
+        if opts.get("reset_statuses"):
+            self.data_panel.reset_all_statuses()
         self._start_execution(opts)
+
+    def _show_info_dialog(self, title: str, text: str) -> None:
+        """Show information message dialog."""
+        QMessageBox.information(self, title, text)
 
     def _start_execution(self, opts: dict[str, Any]) -> None:
         if self._is_running or (self._worker_thread and self._worker_thread.is_alive()):
             return
         self._cancel_step_test()
+        opts = dict(opts)
+        if opts.pop("reset_statuses", False):
+            self.data_panel.reset_all_statuses()
         self._is_running = True
         self._execution_phase = "starting"
         # Swapping the data mid-run would desync row statuses and later retries.
@@ -1271,19 +1301,87 @@ class MainWindow(QMainWindow):
         self._run_token = run_token
         self._pending_summary = None
         try:
-            # All mutable UI state is copied on the UI thread. The worker closes
-            # over only these private snapshots, its controller, and run token.
             macro_snapshot = copy.deepcopy(self._current_macro)
+            total_data_len = len(self._data_rows)
+            excluded_row_nums = self.data_panel.get_excluded_row_numbers()
             if "custom_rows" in opts and "custom_row_nums" in opts:
                 rows_snapshot = copy.deepcopy(opts["custom_rows"])
                 row_nums_snapshot = copy.deepcopy(opts["custom_row_nums"])
-                # Retry rows are already trimmed; slicing them again would drop rows.
-                end_row_index = None
+                start_row_idx = 0
+                end_row_idx = None
+            elif total_data_len > 0 and (excluded_row_nums or opts.get("run_1_row")):
+                raw_start = max(0, opts.get("start_row", 1) - 1)
+                if opts.get("end_row_index") is not None:
+                    raw_end = min(total_data_len, int(opts["end_row_index"]))
+                elif opts.get("run_1_row"):
+                    # When running 1 specific row without an explicit end_row_index, never scan past that row
+                    raw_end = min(total_data_len, raw_start + 1)
+                else:
+                    raw_end = total_data_len
+
+                sliced_rows = self._data_rows[raw_start:raw_end]
+                sliced_nums = self._data_row_nums[raw_start:raw_end]
+
+                final_rows = []
+                final_nums = []
+                for r_data, r_num in zip(sliced_rows, sliced_nums, strict=True):
+                    if r_num not in excluded_row_nums:
+                        final_rows.append(r_data)
+                        final_nums.append(r_num)
+
+                if opts.get("run_1_row", False):
+                    final_rows = final_rows[:1]
+                    final_nums = final_nums[:1]
+
+                if not final_rows:
+                    self._is_running = False
+                    self._execution_phase = "idle"
+                    self.data_panel.set_running(False)
+                    if opts.get("scheduled"):
+                        msg = Strings.ISSUE_ALL_ROWS_EXCLUDED
+                        self.status_bar.showMessage(msg, 5000)
+                        logger.warning("[Scheduled] %s", msg)
+                        return
+
+                    row_statuses = self.data_panel.get_row_statuses()
+                    all_done = bool(sliced_nums) and all(
+                        normalize_status_code(row_statuses.get(n, "")) == "Done"
+                        for n in sliced_nums
+                    )
+                    if all_done:
+                        reply = QMessageBox.question(
+                            self,
+                            Strings.PREFLIGHT_ALL_DONE_TITLE,
+                            Strings.PREFLIGHT_ALL_DONE_MSG,
+                            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                            QMessageBox.StandardButton.Yes,
+                        )
+                        if reply == QMessageBox.StandardButton.Yes:
+                            self.data_panel.reset_all_statuses()
+                            self._start_execution(opts)
+                            return
+
+                    self.status_bar.showMessage(Strings.ISSUE_ALL_ROWS_EXCLUDED, 5000)
+                    self._show_info_dialog(
+                        Strings.APP_TITLE,
+                        f"{Strings.ISSUE_ALL_ROWS_EXCLUDED}\n{Strings.ISSUE_ALL_ROWS_EXCLUDED_DETAILS}",
+                    )
+                    return
+
+                rows_snapshot = copy.deepcopy(final_rows)
+                row_nums_snapshot = copy.deepcopy(final_nums)
+                start_row_idx = 0
+                end_row_idx = None
             else:
                 rows_snapshot = copy.deepcopy(self._data_rows)
                 row_nums_snapshot = copy.deepcopy(self._data_row_nums)
                 end_row_index = opts.get("end_row_index")
+                start_row_idx = max(0, opts.get("start_row", 1) - 1)
+                end_row_idx = int(end_row_index) if end_row_index is not None else None
             opts = copy.deepcopy(opts)
+            if opts.get("run_1_row") or (total_data_len > 0 and excluded_row_nums):
+                opts["custom_row_nums"] = list(row_nums_snapshot)
+                opts["custom_rows"] = list(rows_snapshot)
             self._last_run_opts = opts
             snapshot = ExecutionSnapshot(
                 macro=macro_snapshot,
@@ -1293,8 +1391,8 @@ class MainWindow(QMainWindow):
                 data_filepath=self._data_filepath,
                 results_dir=str(self._user_settings.get("results_dir") or default_results_directory()),
                 speed=opts.get("speed", SpeedMode.NORMAL),
-                start_row_index=max(0, opts.get("start_row", 1) - 1),
-                end_row_index=int(end_row_index) if end_row_index is not None else None,
+                start_row_index=start_row_idx,
+                end_row_index=end_row_idx,
                 skip_setup=opts.get("skip_setup", False),
                 skip_cleanup=opts.get("skip_cleanup", False),
                 run_1_row=opts.get("run_1_row", False),
@@ -1313,9 +1411,13 @@ class MainWindow(QMainWindow):
             )
         except Exception as e:
             self._teardown_runner()
-            QMessageBox.warning(
-                self, Strings.RUN_ERROR_TITLE, Strings.SNAPSHOT_ERROR.format(error=e)
-            )
+            logger.exception("Failed to prepare execution snapshot: %s", e)
+            if not opts.get("scheduled"):
+                QMessageBox.warning(
+                    self, Strings.RUN_ERROR_TITLE, Strings.SNAPSHOT_ERROR.format(error=e)
+                )
+            else:
+                self.status_bar.showMessage(Strings.SNAPSHOT_ERROR.format(error=e), 5000)
             return
 
         controller = ExecutionController()
@@ -1337,7 +1439,11 @@ class MainWindow(QMainWindow):
                 raise RuntimeError("F12 registration was unsuccessful")
         except Exception as e:
             self._teardown_runner()
-            QMessageBox.warning(self, Strings.RUN_ERROR_TITLE, Strings.F12_ERROR.format(error=e))
+            logger.exception("F12 hotkey registration failed: %s", e)
+            if not opts.get("scheduled"):
+                QMessageBox.warning(self, Strings.RUN_ERROR_TITLE, Strings.F12_ERROR.format(error=e))
+            else:
+                self.status_bar.showMessage(Strings.F12_ERROR.format(error=e), 5000)
             return
 
         self.btn_run.setEnabled(False)
@@ -1410,9 +1516,13 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self._teardown_runner()
             self.showNormal()
-            QMessageBox.warning(
-                self, Strings.RUN_ERROR_TITLE, Strings.RUN_START_ERROR.format(error=e)
-            )
+            logger.exception("Failed to start runner thread: %s", e)
+            if not opts.get("scheduled"):
+                QMessageBox.warning(
+                    self, Strings.RUN_ERROR_TITLE, Strings.RUN_START_ERROR.format(error=e)
+                )
+            else:
+                self.status_bar.showMessage(Strings.RUN_START_ERROR.format(error=e), 5000)
 
     @Slot(str, str, object)
     def _on_runner_event(self, token: str, name: str, args: tuple[Any, ...]) -> None:
@@ -1479,12 +1589,15 @@ class MainWindow(QMainWindow):
                 prev_end = prev.get("end_row_index")
         retry_rows: list[dict[str, str]] = []
         retry_row_nums: list[int] = []
+        excluded_rows = self.data_panel.get_excluded_row_numbers()
         for idx, r_num in enumerate(self._data_row_nums):
             if idx >= len(self._data_rows):
                 break
             if prev_end is not None and idx >= int(prev_end):
                 break
             if allowed is not None and r_num not in allowed:
+                continue
+            if r_num in excluded_rows:
                 continue
             if r_num >= first_fail:
                 retry_rows.append(self._data_rows[idx])
@@ -1498,6 +1611,7 @@ class MainWindow(QMainWindow):
         opts.pop("scheduled", None)
         opts.pop("lock_after", None)
         opts.pop("end_row_index", None)
+        opts.pop("reset_statuses", None)
         countdown = float(self._user_settings.get("countdown_seconds", 3) or 0)
         opts.update(
             {

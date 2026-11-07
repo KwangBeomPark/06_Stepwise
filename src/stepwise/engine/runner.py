@@ -19,6 +19,7 @@ from stepwise.engine.actions import _get_val, execute_action
 from stepwise.engine.errors import AbortRequested, StepFailure
 from stepwise.engine.results import ResultsManager, RowResultRecord, compute_row_hash
 from stepwise.engine.timing import ExecutionController, SpeedMode
+from stepwise.services.clipboard import scoped_clipboard_session
 from stepwise.services.jiggler import active_jiggler
 from stepwise.services.power import prevent_screen_sleep
 from stepwise.services.screen import capture_screen
@@ -200,10 +201,14 @@ def run_macro(
     current_row_hash = ""
     current_row_active = False
 
-    with prevent_screen_sleep(), active_jiggler(
-        enabled=anti_lock_jiggler,
-        interval_seconds=jiggler_interval_seconds,
-        should_pulse=lambda: not ctrl.is_paused() and not ctrl.is_stopped(),
+    with (
+        prevent_screen_sleep(),
+        active_jiggler(
+            enabled=anti_lock_jiggler,
+            interval_seconds=jiggler_interval_seconds,
+            should_pulse=lambda: not ctrl.is_paused() and not ctrl.is_stopped(),
+        ),
+        scoped_clipboard_session(),
     ):
         try:
             # 1. SETUP SECTION (Runs once)

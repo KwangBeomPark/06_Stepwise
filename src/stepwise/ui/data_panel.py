@@ -309,6 +309,18 @@ class DataPanel(QWidget):
             if normalize_status_code(status) == "Failed"
         ]
 
+    def get_excluded_row_numbers(self) -> set[int]:
+        """Return set of row numbers that are marked Skipped or Done and should not be executed."""
+        return {
+            r_num
+            for r_num, status in self._row_statuses.items()
+            if normalize_status_code(status) in ("Skipped", "Done")
+        }
+
+    def get_row_statuses(self) -> dict[int, str]:
+        """Return shallow copy of all tracked row statuses."""
+        return dict(self._row_statuses)
+
     def update_row_status(self, row_number: int, status: str) -> None:
         """Update live status for a row using canonical status code while showing localized text."""
         canonical = normalize_status_code(status)
@@ -342,6 +354,15 @@ class DataPanel(QWidget):
             col_name = self._headers[logical_index - 2]
             self.insert_variable_requested.emit(f"{{{col_name}}}")
 
+    def reset_all_statuses(self) -> None:
+        """Reset all row statuses back to blank / Pending."""
+        self._row_statuses.clear()
+        for idx in range(len(self._row_numbers)):
+            item = self.table.item(idx, 1)
+            if item:
+                item.setText("")
+                item.setData(Qt.ItemDataRole.UserRole, "Pending")
+
     def _show_context_menu(self, pos: QPoint) -> None:
         item = self.table.itemAt(pos)
         if not item:
@@ -355,6 +376,8 @@ class DataPanel(QWidget):
         act_done = menu.addAction(Strings.MARK_DONE)
         menu.addSeparator()
         act_run_only = menu.addAction(Strings.RUN_ONLY_THIS_ROW)
+        menu.addSeparator()
+        act_reset_all = menu.addAction(Strings.RESET_ALL_STATUSES)
 
         action = menu.exec(self.table.mapToGlobal(pos))
         if action == act_retry:
@@ -368,3 +391,6 @@ class DataPanel(QWidget):
             self.row_status_override.emit(row_num, "Done")
         elif action == act_run_only:
             self.run_only_row_requested.emit(row_num)
+        elif action == act_reset_all:
+            self.reset_all_statuses()
+            self.row_status_override.emit(-1, "ResetAll")

@@ -472,7 +472,7 @@ def test_clipboard_ownership_and_errors(stage: str) -> None:
 def test_clipboard_failure_cannot_select_or_paste_stale_text() -> None:
     with (
         patch.object(clipboard, "get_clipboard_text", return_value=None),
-        patch.object(clipboard, "set_clipboard_text", return_value=False),
+        patch.object(clipboard, "write_clipboard_text", return_value=(False, None)),
         patch("stepwise.engine.actions.press_keys") as keys,
     ):
         with pytest.raises(StepFailure, match="clipboard") as failure:
@@ -490,10 +490,16 @@ def test_clipboard_write_precedes_selection_and_restoration() -> None:
     events = []
     with (
         patch.object(clipboard, "get_clipboard_text", return_value="original"),
+        patch.object(clipboard, "get_clipboard_sequence_number", return_value=100),
         patch.object(
-            clipboard, "set_clipboard_text", side_effect=lambda text: events.append(text) or True
+            clipboard,
+            "write_clipboard_text",
+            side_effect=lambda text, **kw: events.append(text) or (True, 100),
         ),
-        patch("stepwise.engine.actions.press_keys", side_effect=events.append),
+        patch(
+            "stepwise.engine.actions.press_keys",
+            side_effect=lambda k, **kw: events.append(k) or True,
+        ),
     ):
         execute_action(
             ActionItem(type="type_text", text="new", select_all_first=True), default_wait_before=0

@@ -35,6 +35,15 @@ from stepwise.core.app_paths import (
 
 logger = logging.getLogger(__name__)
 
+
+def _get_powershell_executable() -> str:
+    """Return the absolute path to system PowerShell executable, falling back to powershell.exe."""
+    sys_root = os.environ.get("SystemRoot", r"C:\Windows")
+    system32_ps = os.path.join(sys_root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+    if os.path.isfile(system32_ps):
+        return system32_ps
+    return "powershell.exe"
+
 # Security & Authenticode Policy
 EXPECTED_SIGNER_THUMBPRINT = "E9C72CF5090840A1805296525D56BE680622A7FD"
 EXPECTED_SIGNER_SUBJECT = "CN=Open Source Developer KWANG BEOM PARK"
@@ -257,9 +266,16 @@ def verify_authenticode_signature(exe_path: Path | str) -> tuple[bool, str]:
     if not p.is_file():
         return False, "File does not exist"
 
-    # Primary verification via PowerShell Authenticode API (reliable Oracle)
-    ps_cmd = (
-        f"$sig = Get-AuthenticodeSignature -LiteralPath '{p}'; "
+    # Primary verification via PowerShell Authenticode API using safe environment variable channel
+    ps_script = (
+        "$targetPath = $env:STEPWISE_VERIFY_PATH; "
+        "if ([string]::IsNullOrWhiteSpace($targetPath) -or -not (Test-Path -LiteralPath $targetPath)) { "
+        "  [PSCustomObject]@{Status='NotFound'; Thumbprint=''; Subject=''; HasTimestamp=$false} | ConvertTo-Json -Compress; exit 0 "
+        "}; "
+        "$sig = Get-AuthenticodeSignature -LiteralPath $targetPath; "
+        "if ($null -eq $sig -or $null -eq $sig.SignerCertificate) { "
+        "  [PSCustomObject]@{Status='NotSigned'; Thumbprint=''; Subject=''; HasTimestamp=$false} | ConvertTo-Json -Compress; exit 0 "
+        "}; "
         "[PSCustomObject]@{"
         "Status=$sig.Status.ToString(); "
         "Thumbprint=$sig.SignerCertificate.Thumbprint; "
@@ -268,9 +284,21 @@ def verify_authenticode_signature(exe_path: Path | str) -> tuple[bool, str]:
         "} | ConvertTo-Json -Compress"
     )
 
+    env = dict(os.environ)
+    env["STEPWISE_VERIFY_PATH"] = str(p)
+
     try:
         proc = subprocess.run(
-            ["powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", ps_cmd],
+            [
+                _get_powershell_executable(),
+                "-NoProfile",
+                "-NonInteractive",
+                "-WindowStyle",
+                "Hidden",
+                "-Command",
+                ps_script,
+            ],
+            env=env,
             capture_output=True,
             text=True,
             timeout=15,
@@ -293,22 +321,12 @@ def verify_authenticode_signature(exe_path: Path | str) -> tuple[bool, str]:
                 return False, "Missing valid Authenticode timestamp responder"
 
             return True, subject
-    except Exception as exc:
-        logger.warning("PowerShell signature check failed: %s. Trying WinVerifyTrust fallback.", exc)
 
-    # WinVerifyTrust ctypes fallback
-    try:
-        return _verify_with_winverifytrust(p)
+        stderr_msg = proc.stderr.strip() if proc.stderr else "Unknown PowerShell error"
+        return False, f"PowerShell signature check returned exit code {proc.returncode}: {stderr_msg}"
     except Exception as exc:
+        logger.error("PowerShell signature check failed: %s", exc)
         return False, f"Signature verification error: {exc}"
-
-
-def _verify_with_winverifytrust(path: Path) -> tuple[bool, str]:
-    """WinVerifyTrust ctypes API fallback for Authenticode verification."""
-    wintrust = getattr(ctypes.windll, "wintrust", None)
-    if not wintrust or not hasattr(wintrust, "WinVerifyTrust"):
-        return False, "WinVerifyTrust unavailable"
-    return True, "WinVerifyTrust passed"
 
 
 def acquire_exclusive_read_handle(file_path: Path | str) -> int:
@@ -404,7 +422,7 @@ def execute_installer_handoff(
     )
 
     cmd = [
-        "powershell.exe",
+        _get_powershell_executable(),
         "-NoProfile",
         "-NonInteractive",
         "-WindowStyle",

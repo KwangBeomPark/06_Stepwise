@@ -241,6 +241,15 @@ class Strings:
     SKIP_ROW = "Skip this row"
     MARK_DONE = "Mark as Done"
     RUN_ONLY_THIS_ROW = "Run only this row"
+    RESET_ALL_STATUSES = "Reset all row statuses"
+    RESET_ALL_STATUSES_CONFIRM_TITLE = "Reset Row Statuses"
+    RESET_ALL_STATUSES_CONFIRM_MSG = "Reset all rows back to Pending?\n(Completed rows can be executed again)"
+    PREFLIGHT_EXCLUDED_BREAKDOWN = "Excluded: {count} ({done} done, {skipped} skipped)"
+    PREFLIGHT_ALL_DONE_TITLE = "All Rows Completed"
+    PREFLIGHT_ALL_DONE_MSG = "All rows in the selected range are already completed (Done).\nWould you like to reset row statuses and run from the beginning?"
+    RESET_AND_RUN = "Reset Statuses & Run"
+    PREFLIGHT_FIRST_ROW_SAMPLE = "[First row typing sample]"
+    PREFLIGHT_RUN_1_ROW_TOOLTIP = "Test run only the first row to verify screen actions and results."
 
     # Macro Library
     LIBRARY_TITLE = "Macro Library"
@@ -378,6 +387,8 @@ class Strings:
     ISSUE_SELECTOR_MISSING_DETAILS = "Section: {section}"
     ISSUE_NO_DATA = "Macro requires a data file, but no data is loaded."
     ISSUE_NO_DATA_DETAILS = "Required columns: {columns}"
+    ISSUE_ALL_ROWS_EXCLUDED = "All rows in the selected range are Skipped or Done."
+    ISSUE_ALL_ROWS_EXCLUDED_DETAILS = "There are no data rows to execute in this range."
     ISSUE_MISSING_COLUMNS = "Missing required columns in data file: {columns}"
     ISSUE_MISSING_COLUMNS_DETAILS = "Available columns: {available}"
     ISSUE_BLANK_CELLS = 'Column "{column}" contains empty values on {count} row(s).'
@@ -890,6 +901,15 @@ _KO_STRINGS: dict[str, str] = {
     "SKIP_ROW": "이 행 건너뛰기(Skip)",
     "MARK_DONE": "완료(Done)로 표시",
     "RUN_ONLY_THIS_ROW": "이 행만 단독 실행",
+    "RESET_ALL_STATUSES": "모든 행 상태 초기화",
+    "RESET_ALL_STATUSES_CONFIRM_TITLE": "행 상태 초기화",
+    "RESET_ALL_STATUSES_CONFIRM_MSG": "모든 행의 상태를 '대기(Pending)'로 초기화하시겠습니까?\n(완료된 행을 처음부터 다시 실행할 수 있습니다)",
+    "PREFLIGHT_EXCLUDED_BREAKDOWN": "제외 행: {count}개 (완료: {done}개, 건너뛰기: {skipped}개)",
+    "PREFLIGHT_ALL_DONE_TITLE": "모든 행 완료됨",
+    "PREFLIGHT_ALL_DONE_MSG": "선택한 범위의 모든 행이 이미 완료(Done) 상태입니다.\n행 상태를 초기화하고 처음부터 다시 실행하시겠습니까?",
+    "RESET_AND_RUN": "상태 초기화 후 실행",
+    "PREFLIGHT_FIRST_ROW_SAMPLE": "[첫 행 입력 예시]",
+    "PREFLIGHT_RUN_1_ROW_TOOLTIP": "첫 1개 행만 먼저 실행해보고 결과와 화면 동작을 검증합니다.",
     "LIBRARY_TITLE": "매크로 라이브러리",
     "SEARCH_MACROS": "매크로 검색...",
     "NEW_MACRO": "+ 새 매크로",
@@ -1002,6 +1022,8 @@ _KO_STRINGS: dict[str, str] = {
     "ISSUE_SELECTOR_MISSING_DETAILS": "구간: {section}",
     "ISSUE_NO_DATA": "이 매크로는 데이터 파일이 필요하지만 아직 연결되지 않았습니다.",
     "ISSUE_NO_DATA_DETAILS": "필요한 열: {columns}",
+    "ISSUE_ALL_ROWS_EXCLUDED": "선택한 범위의 모든 행이 건너뛰기(Skipped) 또는 완료(Done) 상태입니다.",
+    "ISSUE_ALL_ROWS_EXCLUDED_DETAILS": "해당 범위에 실행할 데이터 행이 없습니다.",
     "ISSUE_MISSING_COLUMNS": "데이터 파일에 필요한 열이 없습니다: {columns}",
     "ISSUE_MISSING_COLUMNS_DETAILS": "현재 열: {available}",
     "ISSUE_BLANK_CELLS": '"{column}" 열에 빈 칸이 {count}줄 있습니다.',

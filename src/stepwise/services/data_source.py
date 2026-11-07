@@ -19,6 +19,46 @@ import charset_normalizer
 import openpyxl
 
 
+class DuplicateHeaderError(ValueError):
+    """Raised when a data file contains duplicate column headers."""
+
+    pass
+
+
+def col_idx_to_letter(idx: int) -> str:
+    """Convert 0-based column index to Excel column name (0 -> A, 25 -> Z, 26 -> AA)."""
+    result = ""
+    idx += 1
+    while idx > 0:
+        idx, rem = divmod(idx - 1, 26)
+        result = chr(65 + rem) + result
+    return result
+
+
+def validate_and_build_headers(row_vals: list[str]) -> list[str]:
+    """Build clean header names and reject files with duplicate column headers."""
+    seen: dict[str, list[str]] = {}
+    headers: list[str] = []
+
+    for i, val in enumerate(row_vals):
+        col_letter = col_idx_to_letter(i)
+        name = val.strip() if val else f"Column_{i + 1}"
+        headers.append(name)
+        norm_key = name.lower()
+        seen.setdefault(norm_key, []).append(f"'{name}' ({col_letter}열)")
+
+    duplicates = [items for items in seen.values() if len(items) > 1]
+    if duplicates:
+        dup_details = "\n  • ".join(", ".join(items) for items in duplicates)
+        raise DuplicateHeaderError(
+            f"데이터 파일에 중복된 열 이름이 있습니다:\n  • {dup_details}\n\n"
+            "열 이름이 중복되면 변수 매핑 시 데이터가 덮어씌워질 수 있습니다. "
+            "엑셀 또는 CSV 파일에서 중복된 열 이름을 고유하게 변경한 후 다시 불러와 주세요."
+        )
+
+    return headers
+
+
 def normalize_cell_value(val: Any) -> str:
     """Normalize cell values to clean strings following Section 10.1."""
     if val is None:
@@ -140,7 +180,7 @@ def _read_xlsx(
 
             if curr_row_idx == header_row:
                 # Header row
-                headers = [h or f"Column_{i + 1}" for i, h in enumerate(row_vals)]
+                headers = validate_and_build_headers(row_vals)
                 continue
 
             # Check if entire row is blank
@@ -184,7 +224,7 @@ def _read_csv(
             row_vals = [normalize_cell_value(cell) for cell in raw_row]
 
             if curr_row_idx == header_row:
-                headers = [h or f"Column_{i + 1}" for i, h in enumerate(row_vals)]
+                headers = validate_and_build_headers(row_vals)
                 continue
 
             if not any(row_vals):
