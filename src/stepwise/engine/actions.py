@@ -459,7 +459,7 @@ def execute_action(
         x = int(_get_val(action, "window_x", 0))
         y = int(_get_val(action, "window_y", 0))
         width = int(_get_val(action, "window_width", 1280))
-        height = int(_get_val(action, "window_height", 800))
+        height = int(_get_val(action, "window_height", 720))
         maximize = bool(_get_val(action, "window_maximize", False))
 
         from stepwise.services.window_win import find_window_by_title, set_window_bounds

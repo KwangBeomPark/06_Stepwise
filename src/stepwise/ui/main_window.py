@@ -228,6 +228,12 @@ class MainWindow(QMainWindow):
         self.btn_schedule.clicked.connect(self._open_scheduler)
         self.toolbar.addWidget(self.btn_schedule)
 
+        self.btn_align_window = QPushButton(f"📐 {Strings.TOOLBAR_ALIGN_WINDOW}")
+        self.btn_align_window.setObjectName("btn_align_window")
+        self.btn_align_window.setToolTip(Strings.TOOLBAR_ALIGN_WINDOW_TIP)
+        self.btn_align_window.clicked.connect(self._open_window_align_dialog)
+        self.toolbar.addWidget(self.btn_align_window)
+
         self.toolbar.addSeparator()
 
         self.btn_theme = QPushButton(
@@ -1242,6 +1248,8 @@ class MainWindow(QMainWindow):
         self.btn_save.setToolTip(Strings.Tooltips.SAVE_MACRO)
         self.btn_schedule.setText(f"⏰ {Strings.SCHEDULE}")
         self.btn_schedule.setToolTip(Strings.Tooltips.SCHEDULE)
+        self.btn_align_window.setText(f"📐 {Strings.TOOLBAR_ALIGN_WINDOW}")
+        self.btn_align_window.setToolTip(Strings.TOOLBAR_ALIGN_WINDOW_TIP)
         self.btn_theme.setText(
             Strings.THEME_DARK if get_current_theme() == "dark" else Strings.THEME_LIGHT
         )
@@ -1297,6 +1305,97 @@ class MainWindow(QMainWindow):
         )
         if dlg.exec() == SchedulerDialog.Accepted and dlg.confirmed_opts:
             self._start_execution(dlg.confirmed_opts)
+
+    def _open_window_align_dialog(self) -> None:
+        if self._is_running:
+            return
+        self._cancel_step_test()
+        from stepwise.ui.window_align_dialog import WindowAlignDialog
+
+        initial_title = ""
+        initial_x = 0
+        initial_y = 0
+        initial_w = 1280
+        initial_h = 720
+        initial_maximize = False
+
+        # Pre-populate from existing window_set_bounds in setup if present
+        for act in self._current_macro.setup:
+            if act.type == "window_set_bounds" and act.window_title.strip():
+                initial_title = act.window_title.strip()
+                initial_x = act.window_x
+                initial_y = act.window_y
+                initial_w = act.window_width
+                initial_h = act.window_height
+                initial_maximize = act.window_maximize
+                break
+
+        dlg = WindowAlignDialog(
+            parent=self,
+            initial_title=initial_title,
+            initial_x=initial_x,
+            initial_y=initial_y,
+            initial_w=initial_w,
+            initial_h=initial_h,
+            initial_maximize=initial_maximize,
+        )
+        try:
+            dlg.alignment_applied.connect(self._on_window_alignment_applied)
+            dlg.exec()
+        finally:
+            dlg.deleteLater()
+
+    def _on_window_alignment_applied(
+        self,
+        title: str,
+        x: int,
+        y: int,
+        width: int,
+        height: int,
+        maximize: bool,
+        inject_setup: bool,
+    ) -> None:
+        if not inject_setup:
+            self.status_bar.showMessage(
+                Strings.ALIGN_DIALOG_SUCCESS.format(title=title, x=x, y=y, w=width, h=height),
+                4000,
+            )
+            return
+
+        # Inject or update in Setup section (match same title or unconfigured title)
+        target_act: ActionItem | None = None
+        for act in self._current_macro.setup:
+            if act.type == "window_set_bounds":
+                act_title = act.window_title.strip().lower()
+                if not act_title or act_title == title.strip().lower():
+                    target_act = act
+                    break
+
+        if target_act is not None:
+            target_act.window_title = title
+            target_act.window_x = x
+            target_act.window_y = y
+            target_act.window_width = width
+            target_act.window_height = height
+            target_act.window_maximize = maximize
+        else:
+            target_act = ActionItem(
+                type="window_set_bounds",
+                window_title=title,
+                window_x=x,
+                window_y=y,
+                window_width=width,
+                window_height=height,
+                window_maximize=maximize,
+                enabled=True,
+            )
+            self._current_macro.setup.insert(0, target_act)
+
+        self.action_tree.rebuild_tree(select_id=target_act.id)
+        # Re-bind properties panel to guarantee live UI sync
+        self.prop_panel.set_action(target_act)
+        self._update_window_title()
+        self.status_bar.showMessage(Strings.ALIGN_DIALOG_SETUP_ADDED, 4000)
 
     def _on_run_clicked(self) -> None:
         if self._is_running:

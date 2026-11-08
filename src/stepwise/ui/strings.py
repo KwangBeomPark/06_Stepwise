@@ -210,9 +210,43 @@ class Strings:
     WINDOW_TITLE_LABEL = "Window Title:"
     WINDOW_PICK_BUTTON = "🔍 Pick Window"
     WINDOW_PICK_TOOLTIP = "Select from currently visible application windows"
+    WINDOW_PRESET_LABEL = "Preset Size:"
+    WINDOW_PRESET_1280_720 = "1280 × 720 (HD - Recommended)"
+    WINDOW_PRESET_1600_900 = "1600 × 900 (HD+)"
+    WINDOW_PRESET_1920_1040 = "1920 × 1040 (FHD Fill)"
+    WINDOW_PRESET_1024_768 = "1024 × 768 (Legacy XGA)"
+    WINDOW_PRESET_CUSTOM = "Custom..."
     WINDOW_POS_LABEL = "Top-Left Position:"
+    WINDOW_SNAP_ORIGIN = "Snap (0, 0)"
+    WINDOW_SNAP_ORIGIN_TIP = "Set window top-left position to screen origin (0, 0)"
     WINDOW_SIZE_LABEL = "Window Size:"
+    WINDOW_GET_CURRENT = "📍 Get Current Bounds"
+    WINDOW_GET_CURRENT_TIP = "Fetch current on-screen position and size of the target window"
+    WINDOW_TEST_APPLY = "⚡ Test Align Now"
+    WINDOW_TEST_APPLY_TIP = "Apply alignment to the target window right now to preview layout"
     WINDOW_MAXIMIZE_LABEL = "Maximize window instead of resizing"
+    WINDOW_TITLE_REQUIRED_TITLE = "Window Title Required"
+    WINDOW_TITLE_REQUIRED_MSG = "Please enter or pick a target window title first."
+    WINDOW_NOT_FOUND_TITLE = "Window Not Found"
+    WINDOW_NOT_FOUND_MSG = "No visible window matching '{title}' was detected."
+    WINDOW_INSPECT_FAIL_TITLE = "Inspection Failed"
+    WINDOW_INSPECT_FAIL_MSG = "Could not measure bounds for window '{title}'."
+    WINDOW_ALIGN_FAIL_TITLE = "Alignment Failed"
+    WINDOW_ALIGN_FAIL_MSG = "Failed to align window:\n{error}"
+    WINDOW_ALIGN_NOTICE_TITLE = "Aligned with Notice"
+    WINDOW_ALIGN_NOTICE_MSG = "Window was positioned, but note:\n{notice}"
+    WINDOW_ALIGN_SUCCESS_TITLE = "Alignment Successful"
+    WINDOW_ALIGN_SUCCESS_MSG = "Window '{title}' successfully aligned and brought to front!"
+    TOOLBAR_ALIGN_WINDOW = "Align Window"
+    TOOLBAR_ALIGN_WINDOW_TIP = "Tool to resize and snap target application window to (0, 0) and inject into Setup"
+    ALIGN_DIALOG_TITLE = "Window Alignment & Normalization Tool"
+    ALIGN_DIALOG_WINDOW_LABEL = "Select Target Window:"
+    ALIGN_DIALOG_REFRESH_TIP = "Refresh list of open application windows"
+    ALIGN_DIALOG_INJECT_SETUP = "Add or update as first action in Setup section"
+    ALIGN_DIALOG_APPLY_BTN = "🚀 Align Window Now"
+    ALIGN_DIALOG_SUCCESS = "Window '{title}' aligned to ({x}, {y}) {w}x{h} successfully."
+    ALIGN_DIALOG_SETUP_ADDED = "Added Window Alignment action to Setup section."
+    BTN_CLOSE = "Close"
 
     # Image Helper Buttons
     PICK_COORDS = "Pick (F8)"
@@ -904,9 +938,43 @@ _KO_STRINGS: dict[str, str] = {
     "WINDOW_TITLE_LABEL": "대상 창 제목:",
     "WINDOW_PICK_BUTTON": "🔍 실행 중인 창 선택",
     "WINDOW_PICK_TOOLTIP": "현재 열려 있는 프로그램 창 목록에서 선택합니다",
+    "WINDOW_PRESET_LABEL": "표준 크기 프리셋:",
+    "WINDOW_PRESET_1280_720": "1280 × 720 (HD - 기본 권장)",
+    "WINDOW_PRESET_1600_900": "1600 × 900 (HD+)",
+    "WINDOW_PRESET_1920_1040": "1920 × 1040 (FHD 채움)",
+    "WINDOW_PRESET_1024_768": "1024 × 768 (구형 XGA/VDI)",
+    "WINDOW_PRESET_CUSTOM": "직접 입력...",
     "WINDOW_POS_LABEL": "창 좌측 상단 위치:",
+    "WINDOW_SNAP_ORIGIN": "(0, 0) 스냅",
+    "WINDOW_SNAP_ORIGIN_TIP": "창 좌측 상단 위치를 화면 원점(0, 0)으로 맞춥니다",
     "WINDOW_SIZE_LABEL": "창 크기:",
+    "WINDOW_GET_CURRENT": "📍 현재 창 위치/크기 가져오기",
+    "WINDOW_GET_CURRENT_TIP": "대상 창의 현재 화면 위치와 크기를 실측하여 자동으로 채웁니다",
+    "WINDOW_TEST_APPLY": "⚡ 지금 즉시 정렬 테스트",
+    "WINDOW_TEST_APPLY_TIP": "대상 프로그램 창을 지금 즉시 지정한 위치/크기로 이동시켜 봅니다",
     "WINDOW_MAXIMIZE_LABEL": "크기 지정 대신 창 최대화(Maximize)",
+    "WINDOW_TITLE_REQUIRED_TITLE": "창 제목 필요",
+    "WINDOW_TITLE_REQUIRED_MSG": "대상 창의 제목을 먼저 입력하거나 선택해 주세요.",
+    "WINDOW_NOT_FOUND_TITLE": "창을 찾을 수 없음",
+    "WINDOW_NOT_FOUND_MSG": "'{title}'에 일치하는 표시 창을 찾지 못했습니다.",
+    "WINDOW_INSPECT_FAIL_TITLE": "측정 실패",
+    "WINDOW_INSPECT_FAIL_MSG": "'{title}' 창의 화면 크기를 측정할 수 없습니다.",
+    "WINDOW_ALIGN_FAIL_TITLE": "정렬 실패",
+    "WINDOW_ALIGN_FAIL_MSG": "창 정렬에 실패했습니다:\n{error}",
+    "WINDOW_ALIGN_NOTICE_TITLE": "정렬 완료 (안내사항)",
+    "WINDOW_ALIGN_NOTICE_MSG": "창이 정렬되었으나 다음 사항을 확인하세요:\n{notice}",
+    "WINDOW_ALIGN_SUCCESS_TITLE": "창 정렬 성공",
+    "WINDOW_ALIGN_SUCCESS_MSG": "'{title}' 창이 지정한 위치/크기로 성공적으로 정렬되었습니다!",
+    "TOOLBAR_ALIGN_WINDOW": "창 크기 정렬",
+    "TOOLBAR_ALIGN_WINDOW_TIP": "대상 프로그램 창을 표준 크기와 (0, 0) 위치로 맞추고 Setup에 등록합니다",
+    "ALIGN_DIALOG_TITLE": "창 크기·위치 정규화 도구",
+    "ALIGN_DIALOG_WINDOW_LABEL": "대상 프로그램 창 선택:",
+    "ALIGN_DIALOG_REFRESH_TIP": "열려 있는 프로그램 창 목록 새로고침",
+    "ALIGN_DIALOG_INJECT_SETUP": "매크로 Setup(시작 구역) 첫 번째 동작으로 자동 추가/갱신",
+    "ALIGN_DIALOG_APPLY_BTN": "🚀 지금 창 정렬 실행",
+    "ALIGN_DIALOG_SUCCESS": "'{title}' 창을 ({x}, {y}) {w}x{h} 크기로 성공적으로 정렬했습니다.",
+    "ALIGN_DIALOG_SETUP_ADDED": "매크로 Setup 구역에 창 정렬 동작을 추가했습니다.",
+    "BTN_CLOSE": "닫기",
     "PICK_COORDS": "좌표 지정 (F8)",
     "CAPTURE_IMAGE": "화면 캡처 (F9)",
     "SHOW_ON_SCREEN": "위치 표시",

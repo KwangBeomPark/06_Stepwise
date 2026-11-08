@@ -164,7 +164,7 @@ class ActionItem:
     window_x: int = 0
     window_y: int = 0
     window_width: int = 1280
-    window_height: int = 800
+    window_height: int = 720
     window_maximize: bool = False
 
     # Group container parameters
@@ -307,7 +307,7 @@ class ActionItem:
         act.window_x = int(data.get("window_x", 0))
         act.window_y = int(data.get("window_y", 0))
         act.window_width = int(data.get("window_width", 1280))
-        act.window_height = int(data.get("window_height", 800))
+        act.window_height = int(data.get("window_height", 720))
         act.window_maximize = bool(data.get("window_maximize", False))
 
         act.name = str(data.get("name", ""))

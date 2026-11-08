@@ -13,7 +13,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QSignalBlocker, Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -533,6 +533,18 @@ class PropertiesPanel(QWidget):
             h_title.addWidget(btn_refresh_wins)
             act_layout.addRow(Strings.WINDOW_TITLE_LABEL, h_title)
 
+            # Standard size preset combo
+            presets = [
+                (Strings.WINDOW_PRESET_1280_720, 1280, 720),
+                (Strings.WINDOW_PRESET_1600_900, 1600, 900),
+                (Strings.WINDOW_PRESET_1920_1040, 1920, 1040),
+                (Strings.WINDOW_PRESET_1024_768, 1024, 768),
+                (Strings.WINDOW_PRESET_CUSTOM, None, None),
+            ]
+            self.cbo_win_preset = QComboBox()
+            for label, _, _ in presets:
+                self.cbo_win_preset.addItem(label)
+
             h_pos = QHBoxLayout()
             self.spin_win_x = QSpinBox()
             self.spin_win_x.setRange(-9999, 9999)
@@ -548,26 +560,70 @@ class PropertiesPanel(QWidget):
                 lambda v: setattr(action, "window_y", v) or self.property_changed.emit()
             )
 
+            btn_snap_origin = QPushButton(Strings.WINDOW_SNAP_ORIGIN)
+            btn_snap_origin.setToolTip(Strings.WINDOW_SNAP_ORIGIN_TIP)
+
+            def _on_snap_origin() -> None:
+                self.spin_win_x.setValue(0)
+                self.spin_win_y.setValue(0)
+
+            btn_snap_origin.clicked.connect(_on_snap_origin)
+
             h_pos.addWidget(QLabel("X:"))
             h_pos.addWidget(self.spin_win_x)
             h_pos.addWidget(QLabel("Y:"))
             h_pos.addWidget(self.spin_win_y)
+            h_pos.addWidget(btn_snap_origin)
             act_layout.addRow(Strings.WINDOW_POS_LABEL, h_pos)
 
             h_size = QHBoxLayout()
             self.spin_win_w = QSpinBox()
             self.spin_win_w.setRange(100, 9999)
             self.spin_win_w.setValue(action.window_width)
-            self.spin_win_w.valueChanged.connect(
-                lambda v: setattr(action, "window_width", v) or self.property_changed.emit()
-            )
 
             self.spin_win_h = QSpinBox()
             self.spin_win_h.setRange(100, 9999)
             self.spin_win_h.setValue(action.window_height)
-            self.spin_win_h.valueChanged.connect(
-                lambda v: setattr(action, "window_height", v) or self.property_changed.emit()
-            )
+
+            # Match initial preset
+            matched_idx = 4  # Default Custom
+            for i, (_, pw, ph) in enumerate(presets[:4]):
+                if action.window_width == pw and action.window_height == ph:
+                    matched_idx = i
+                    break
+            self.cbo_win_preset.setCurrentIndex(matched_idx)
+
+            def _on_preset_changed(idx: int) -> None:
+                _, pw, ph = presets[idx]
+                if pw is not None and ph is not None:
+                    _b1 = QSignalBlocker(self.spin_win_w)
+                    _b2 = QSignalBlocker(self.spin_win_h)
+                    self.spin_win_w.setValue(pw)
+                    self.spin_win_h.setValue(ph)
+                    del _b1, _b2
+                    action.window_width = pw
+                    action.window_height = ph
+                    self.property_changed.emit()
+
+            self.cbo_win_preset.currentIndexChanged.connect(_on_preset_changed)
+            act_layout.addRow(Strings.WINDOW_PRESET_LABEL, self.cbo_win_preset)
+
+            def _on_custom_size_changed() -> None:
+                action.window_width = self.spin_win_w.value()
+                action.window_height = self.spin_win_h.value()
+                # Check if matches any preset
+                m_idx = 4
+                for i, (_, pw, ph) in enumerate(presets[:4]):
+                    if action.window_width == pw and action.window_height == ph:
+                        m_idx = i
+                        break
+                _b = QSignalBlocker(self.cbo_win_preset)
+                self.cbo_win_preset.setCurrentIndex(m_idx)
+                del _b
+                self.property_changed.emit()
+
+            self.spin_win_w.valueChanged.connect(_on_custom_size_changed)
+            self.spin_win_h.valueChanged.connect(_on_custom_size_changed)
 
             h_size.addWidget(QLabel("Width:"))
             h_size.addWidget(self.spin_win_w)
@@ -577,10 +633,142 @@ class PropertiesPanel(QWidget):
 
             self.chk_win_max = QCheckBox(Strings.WINDOW_MAXIMIZE_LABEL)
             self.chk_win_max.setChecked(action.window_maximize)
-            self.chk_win_max.toggled.connect(
-                lambda v: setattr(action, "window_maximize", v) or self.property_changed.emit()
-            )
+
+            def _update_max_controls(v: bool) -> None:
+                self.cbo_win_preset.setEnabled(not v)
+                self.spin_win_x.setEnabled(not v)
+                self.spin_win_y.setEnabled(not v)
+                btn_snap_origin.setEnabled(not v)
+                self.spin_win_w.setEnabled(not v)
+                self.spin_win_h.setEnabled(not v)
+
+            def _on_maximize_toggled(v: bool) -> None:
+                action.window_maximize = v
+                _update_max_controls(v)
+                self.property_changed.emit()
+
+            self.chk_win_max.toggled.connect(_on_maximize_toggled)
+            _update_max_controls(action.window_maximize)
             act_layout.addRow("Mode:", self.chk_win_max)
+
+            # Quick helper action buttons
+            h_win_actions = QHBoxLayout()
+            btn_get_bounds = QPushButton(Strings.WINDOW_GET_CURRENT)
+            btn_get_bounds.setToolTip(Strings.WINDOW_GET_CURRENT_TIP)
+
+            def _resolve_target_title() -> str:
+                raw = self.txt_win_title.text().strip()
+                if not raw:
+                    return ""
+                sample_dict = getattr(self, "_sample_row", {}) or getattr(self, "row_data", {})
+                if "{" in raw and "}" in raw and sample_dict:
+                    try:
+                        return substitute_variables(raw, sample_dict, strict=False)
+                    except Exception:
+                        pass
+                return raw
+
+            def _on_get_bounds() -> None:
+                from PySide6.QtWidgets import QMessageBox
+
+                from stepwise.services.window_win import (
+                    find_window_by_title,
+                    get_window_visual_bounds,
+                )
+
+                if self.before_prompt is not None:
+                    self.before_prompt()
+
+                title = _resolve_target_title()
+                if not title:
+                    QMessageBox.warning(
+                        self,
+                        Strings.WINDOW_TITLE_REQUIRED_TITLE,
+                        Strings.WINDOW_TITLE_REQUIRED_MSG,
+                    )
+                    return
+                hwnd = find_window_by_title(title)
+                if not hwnd:
+                    QMessageBox.warning(
+                        self,
+                        Strings.WINDOW_NOT_FOUND_TITLE,
+                        Strings.WINDOW_NOT_FOUND_MSG.format(title=title),
+                    )
+                    return
+                cur_x, cur_y, cur_w, cur_h = get_window_visual_bounds(hwnd)
+                if cur_w <= 0 or cur_h <= 0:
+                    QMessageBox.warning(
+                        self,
+                        Strings.WINDOW_INSPECT_FAIL_TITLE,
+                        Strings.WINDOW_INSPECT_FAIL_MSG.format(title=title),
+                    )
+                    return
+                self.spin_win_x.setValue(cur_x)
+                self.spin_win_y.setValue(cur_y)
+                self.spin_win_w.setValue(cur_w)
+                self.spin_win_h.setValue(cur_h)
+
+            btn_get_bounds.clicked.connect(_on_get_bounds)
+
+            btn_test_align = QPushButton(Strings.WINDOW_TEST_APPLY)
+            btn_test_align.setToolTip(Strings.WINDOW_TEST_APPLY_TIP)
+
+            def _on_test_align() -> None:
+                from PySide6.QtWidgets import QMessageBox
+
+                from stepwise.services.window_win import find_window_by_title, set_window_bounds
+
+                if self.before_prompt is not None:
+                    self.before_prompt()
+
+                title = _resolve_target_title()
+                if not title:
+                    QMessageBox.warning(
+                        self,
+                        Strings.WINDOW_TITLE_REQUIRED_TITLE,
+                        Strings.WINDOW_TITLE_REQUIRED_MSG,
+                    )
+                    return
+                hwnd = find_window_by_title(title)
+                if not hwnd:
+                    QMessageBox.warning(
+                        self,
+                        Strings.WINDOW_NOT_FOUND_TITLE,
+                        Strings.WINDOW_NOT_FOUND_MSG.format(title=title),
+                    )
+                    return
+                ok, msg = set_window_bounds(
+                    hwnd,
+                    x=self.spin_win_x.value(),
+                    y=self.spin_win_y.value(),
+                    width=self.spin_win_w.value(),
+                    height=self.spin_win_h.value(),
+                    maximize=self.chk_win_max.isChecked(),
+                )
+                if not ok:
+                    QMessageBox.critical(
+                        self,
+                        Strings.WINDOW_ALIGN_FAIL_TITLE,
+                        Strings.WINDOW_ALIGN_FAIL_MSG.format(error=msg),
+                    )
+                elif msg:
+                    QMessageBox.information(
+                        self,
+                        Strings.WINDOW_ALIGN_NOTICE_TITLE,
+                        Strings.WINDOW_ALIGN_NOTICE_MSG.format(notice=msg),
+                    )
+                else:
+                    QMessageBox.information(
+                        self,
+                        Strings.WINDOW_ALIGN_SUCCESS_TITLE,
+                        Strings.WINDOW_ALIGN_SUCCESS_MSG.format(title=title),
+                    )
+
+            btn_test_align.clicked.connect(_on_test_align)
+
+            h_win_actions.addWidget(btn_get_bounds)
+            h_win_actions.addWidget(btn_test_align)
+            act_layout.addRow(h_win_actions)
 
         self.container_layout.addWidget(act_box)
 
@@ -783,6 +971,10 @@ class PropertiesPanel(QWidget):
         has_korean = bool(re.search(r"[\uac00-\ud7a3]", raw_text + resolved))
         if self.lbl_hangeul_hint is not None:
             self.lbl_hangeul_hint.setVisible(has_korean and action.mode == "keystrokes")
+
+    def set_sample_row(self, sample_row: dict[str, str]) -> None:
+        """Set sample row data for design-time variable preview and resolution."""
+        self._sample_row = sample_row
 
     def update_variable_completions(
         self, headers: list[str], sample_row: dict[str, str] | None = None

@@ -31,7 +31,20 @@ SWP_SHOWWINDOW = 0x0040
 GW_OWNER = 4
 GWL_STYLE = -16
 WS_CHILD = 0x40000000
+DWMWA_EXTENDED_FRAME_BOUNDS = 9
 DWMWA_CLOAKED = 14
+
+
+class RECT(ctypes.Structure):
+    """Win32 RECT structure for window geometry."""
+
+    _fields_ = [
+        ("left", wintypes.LONG),
+        ("top", wintypes.LONG),
+        ("right", wintypes.LONG),
+        ("bottom", wintypes.LONG),
+    ]
+
 
 # Explicit ctypes function prototypes for 64-bit safe interop
 WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
@@ -60,6 +73,9 @@ user32.GetWindowTextLengthW.restype = ctypes.c_int
 user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
 user32.GetWindowTextW.restype = ctypes.c_int
 
+user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(RECT)]
+user32.GetWindowRect.restype = wintypes.BOOL
+
 user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
 user32.ShowWindow.restype = wintypes.BOOL
 
@@ -77,8 +93,23 @@ user32.SetWindowPos.restype = wintypes.BOOL
 user32.SetForegroundWindow.argtypes = [wintypes.HWND]
 user32.SetForegroundWindow.restype = wintypes.BOOL
 
+user32.BringWindowToTop.argtypes = [wintypes.HWND]
+user32.BringWindowToTop.restype = wintypes.BOOL
+
+user32.GetForegroundWindow.argtypes = []
+user32.GetForegroundWindow.restype = wintypes.HWND
+
 user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
 user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+
+if dwmapi and hasattr(dwmapi, "DwmGetWindowAttribute"):
+    dwmapi.DwmGetWindowAttribute.argtypes = [
+        wintypes.HWND,
+        wintypes.DWORD,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+    ]
+    dwmapi.DwmGetWindowAttribute.restype = ctypes.c_long
 
 if hasattr(user32, "GetWindowLongPtrW"):
     user32.GetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int]
@@ -132,7 +163,7 @@ def is_alt_tab_window(hwnd: int, exclude_pid: int | None = None) -> bool:
             return False
 
     # Must not have an owner window (top-level only)
-    if user32.GetWindow(hwnd, GW_OWNER) != 0:
+    if user32.GetWindow(hwnd, GW_OWNER):
         return False
 
     title = get_window_title(hwnd).strip()
@@ -194,45 +225,123 @@ def find_window_by_title(
     return None
 
 
+def get_window_visual_bounds(hwnd: int) -> tuple[int, int, int, int]:
+    """Retrieve visual on-screen window bounds (x, y, width, height) excluding DWM drop shadow.
+
+    Falls back to Win32 GetWindowRect if DWM extended frame bounds are unavailable.
+    """
+    if not user32.IsWindow(hwnd):
+        return (0, 0, 0, 0)
+
+    # 1. Try DWM extended frame bounds (accurate visual frame without transparent shadow)
+    if dwmapi and hasattr(dwmapi, "DwmGetWindowAttribute"):
+        try:
+            dwm_rect = RECT()
+            res = dwmapi.DwmGetWindowAttribute(
+                wintypes.HWND(hwnd),
+                wintypes.DWORD(DWMWA_EXTENDED_FRAME_BOUNDS),
+                ctypes.pointer(dwm_rect),
+                ctypes.sizeof(dwm_rect),
+            )
+            if res == 0:
+                w = max(0, dwm_rect.right - dwm_rect.left)
+                h = max(0, dwm_rect.bottom - dwm_rect.top)
+                return (dwm_rect.left, dwm_rect.top, w, h)
+        except Exception:
+            pass
+
+    # 2. Fallback to standard GetWindowRect
+    win_rect = RECT()
+    if user32.GetWindowRect(hwnd, ctypes.pointer(win_rect)):
+        w = max(0, win_rect.right - win_rect.left)
+        h = max(0, win_rect.bottom - win_rect.top)
+        return (win_rect.left, win_rect.top, w, h)
+
+    return (0, 0, 0, 0)
+
+
+def get_frame_offsets(hwnd: int) -> tuple[int, int, int, int]:
+    """Calculate transparent frame offsets: (left_offset, top_offset, right_offset, bottom_offset).
+
+    Differences between Win32 outer frame and DWM visual frame.
+    """
+    if not dwmapi or not hasattr(dwmapi, "DwmGetWindowAttribute"):
+        return (0, 0, 0, 0)
+
+    try:
+        win_rect = RECT()
+        if not user32.GetWindowRect(hwnd, ctypes.pointer(win_rect)):
+            return (0, 0, 0, 0)
+
+        dwm_rect = RECT()
+        res = dwmapi.DwmGetWindowAttribute(
+            wintypes.HWND(hwnd),
+            wintypes.DWORD(DWMWA_EXTENDED_FRAME_BOUNDS),
+            ctypes.pointer(dwm_rect),
+            ctypes.sizeof(dwm_rect),
+        )
+        if res != 0:
+            return (0, 0, 0, 0)
+
+        l_off = max(0, dwm_rect.left - win_rect.left)
+        t_off = max(0, dwm_rect.top - win_rect.top)
+        r_off = max(0, win_rect.right - dwm_rect.right)
+        b_off = max(0, win_rect.bottom - dwm_rect.bottom)
+        return (l_off, t_off, r_off, b_off)
+    except Exception:
+        return (0, 0, 0, 0)
+
+
 def set_window_bounds(
     hwnd: int,
     x: int = 0,
     y: int = 0,
     width: int = 1280,
-    height: int = 800,
+    height: int = 720,
     maximize: bool = False,
     settle_seconds: float = 0.2,
 ) -> tuple[bool, str]:
-    """Position and size window. Restores minimized windows and brings to front.
+    """Position and size window with DWM visual frame compensation and focus guarantee.
 
-    Returns (success: bool, error_message: str).
+    - Restores minimized (IsIconic) or maximized (IsZoomed) windows prior to custom sizing.
+    - Compensates for Windows 10/11 invisible drop-shadow frame borders to achieve exact visual bounds.
+    - Brings window to foreground with fallback enforcement and verification.
+    - Verifies actual final bounds against target application minimum-size/position constraints.
+
+    Returns (success: bool, warning_or_error_message: str).
     """
     if not user32.IsWindow(hwnd):
         return False, "Invalid window handle (window may have closed)."
 
-    # 1. Restore if minimized
-    if user32.IsIconic(hwnd):
-        user32.ShowWindow(hwnd, SW_RESTORE)
-        time.sleep(0.1)
-
-    # 2. Handle maximize or custom bounds
+    # 1. Handle maximize
     if maximize:
+        if user32.IsIconic(hwnd):
+            user32.ShowWindow(hwnd, SW_RESTORE)
+            time.sleep(0.05)
         user32.ShowWindow(hwnd, SW_MAXIMIZE)
     else:
-        # If currently maximized, un-maximize (restore) first to allow custom sizing
-        if user32.IsZoomed(hwnd):
+        # Restore if currently minimized or maximized before resizing
+        if user32.IsIconic(hwnd) or user32.IsZoomed(hwnd):
             user32.ShowWindow(hwnd, SW_RESTORE)
-            time.sleep(0.1)
+            time.sleep(0.05)
 
-        # Do not force SWP_SHOWWINDOW if window is already visible; avoid unhiding hidden windows
+        # 2. Measure DWM transparent frame offsets for sub-pixel/frame compensation
+        l_off, t_off, r_off, b_off = get_frame_offsets(hwnd)
+
+        # Adjust Win32 coordinates so visual frame aligns exactly with target (x, y, width, height)
+        target_x = int(x) - l_off
+        target_y = int(y) - t_off
+        target_w = max(100, int(width) + l_off + r_off)
+        target_h = max(100, int(height) + t_off + b_off)
+
         flags = SWP_NOZORDER
         ok = user32.SetWindowPos(
             hwnd,
             0,
-            int(x),
-            int(y),
-            max(100, int(width)),
-            max(100, int(height)),
+            target_x,
+            target_y,
+            target_w,
+            target_h,
             flags,
         )
         if not ok:
@@ -242,10 +351,36 @@ def set_window_bounds(
                 msg += " Target window may be running as Administrator (UIPI blocked)."
             return False, msg
 
-    # 3. Bring to front and activate
+    # 3. Bring to front and activate with fallback
     user32.SetForegroundWindow(hwnd)
+    if user32.GetForegroundWindow() != hwnd:
+        user32.BringWindowToTop(hwnd)
+        user32.ShowWindow(hwnd, SW_SHOW)
 
     if settle_seconds > 0:
         time.sleep(settle_seconds)
 
-    return True, ""
+    warnings: list[str] = []
+
+    # 4. Measure actual final visual bounds to detect layout/size constraints
+    if not maximize:
+        act_x, act_y, act_w, act_h = get_window_visual_bounds(hwnd)
+        if act_w > 0 and act_h > 0:
+            w_diff = abs(act_w - int(width))
+            h_diff = abs(act_h - int(height))
+            if w_diff > 40 or h_diff > 40:
+                warnings.append(
+                    f"Target window constrained to {act_w}x{act_h} (requested {width}x{height})."
+                )
+            x_diff = abs(act_x - int(x))
+            y_diff = abs(act_y - int(y))
+            if x_diff > 40 or y_diff > 40:
+                warnings.append(
+                    f"Window position offset at ({act_x}, {act_y}) (requested ({x}, {y}))."
+                )
+
+    # 5. Check if foreground activation succeeded
+    if user32.GetForegroundWindow() != hwnd:
+        warnings.append("Could not gain foreground focus (Windows lock active).")
+
+    return True, " ".join(warnings)
